@@ -6,6 +6,7 @@ import {
   exportFromBrowser,
   saveCookieFile,
 } from "./cookie-store.server";
+import { clearLog, dumpLogText, listLog } from "./yt-log.server";
 
 const inputSchema = z.object({
   input: z.string().trim().min(1, "Вставьте ссылку или запрос").max(500),
@@ -16,16 +17,38 @@ export const getExtractorCaps = createServerFn({ method: "GET" }).handler(
   async () => getCaps(),
 );
 
+export const getExtractorLog = createServerFn({ method: "GET" })
+  .validator(z.object({ after: z.coerce.number().int().nonnegative().optional() }))
+  .handler(async ({ data }) => listLog(data.after ?? 0));
+
+export const clearExtractorLog = createServerFn({ method: "POST" }).handler(
+  async () => {
+    clearLog();
+    return { ok: true as const };
+  },
+);
+
 export const resolveMedia = createServerFn({ method: "POST" })
   .validator(inputSchema)
   .handler(async ({ data }) => {
     try {
-      return await resolveInput(data.input, data.cookies);
+      const result = await resolveInput(data.input, data.cookies);
+      return { ok: true as const, result, log: dumpLogText(24) };
     } catch (err) {
       if (err instanceof ExtractorError) {
-        throw new Error(err.message);
+        return {
+          ok: false as const,
+          message: err.message,
+          code: err.code,
+          log: err.log || dumpLogText(40),
+        };
       }
-      throw err;
+      return {
+        ok: false as const,
+        message: err instanceof Error ? err.message : "Не удалось разобрать ссылку.",
+        code: "EXTRACT",
+        log: dumpLogText(40),
+      };
     }
   });
 

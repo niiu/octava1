@@ -29,11 +29,13 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Wordmark } from "@/components/octava/logo";
 import { CookiesPanel } from "@/components/octava/cookies-panel";
+import { YtConsole } from "@/components/octava/console";
 import { getBlobUrl, hasBlob } from "@/lib/blobs";
-import { fetchAudioBlob } from "@/lib/download-client";
+import { DownloadError, fetchAudioBlob } from "@/lib/download-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
+import { ingestYtText, noteYt } from "@/lib/yt-log-client";
 import type { AudioFormat, ExtractorCaps, ResolveResult, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
@@ -135,24 +137,42 @@ export function OctavaApp() {
   }, [activePlaylistId, inboxTracks, historyIds, catalog, playlists]);
 
   const selectedVisible = visibleTracks.filter((t) => selectedIds.includes(t.id));
+  const allVisibleSelected =
+    visibleTracks.length > 0 && selectedVisible.length === visibleTracks.length;
+  const someVisibleSelected = selectedVisible.length > 0 && !allVisibleSelected;
+
+  function toggleAllVisible() {
+    if (allVisibleSelected) clearSelected();
+    else setSelected(visibleTracks.map((t) => t.id));
+  }
 
   async function onResolve(event?: FormEvent) {
     event?.preventDefault();
     const q = input.trim();
     if (!q) return;
     setBusy(true);
+    noteYt("info", `запрос: ${q}`);
     try {
-      const next = await resolveMedia({ data: { input: q, cookies: cookiePayload(cookies) } });
+      const out = await resolveMedia({ data: { input: q, cookies: cookiePayload(cookies) } });
+      ingestYtText(out.log);
+      if (!out.ok) {
+        noteYt("error", out.message);
+        toast.error(out.message);
+        return;
+      }
+      const next = out.result;
       setResult(next);
       const tracks = next.kind === "video" ? [next.track] : next.tracks;
       remember(tracks);
       setActivePlaylistId("inbox");
-      setSelected(tracks.map((t) => t.id));
+      clearSelected();
       if (tracks.length === 0) {
         toast.message("Ничего не найдено");
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось разобрать ссылку");
+      const message = err instanceof Error ? err.message : "Не удалось разобрать ссылку";
+      noteYt("error", message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -165,6 +185,7 @@ export function OctavaApp() {
 
   async function downloadOne(track: Track) {
     setProgress((p) => ({ ...p, [track.id]: 0.02 }));
+    noteYt("info", `скачивание «${track.title}»`);
     try {
       const blob = await fetchAudioBlob(track.id, format, (ratio) => {
         setProgress((p) => ({ ...p, [track.id]: ratio }));
@@ -172,9 +193,13 @@ export function OctavaApp() {
       setReady((r) => ({ ...r, [track.id]: true }));
       const ext = extensionFor(format, blob.type);
       saveBlob(blob, `${safeFilename(track.title)}.${ext}`);
+      noteYt("ok", `сохранено «${track.title}»`);
       toast.success("Файл сохранён");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Ошибка загрузки");
+      const message = err instanceof Error ? err.message : "Ошибка загрузки";
+      noteYt("error", `${track.title}: ${message}`);
+      if (err instanceof DownloadError) ingestYtText(err.log, "error");
+      toast.error(message);
     } finally {
       setProgress((p) => {
         const next = { ...p };
@@ -206,9 +231,10 @@ export function OctavaApp() {
         setReady((r) => ({ ...r, [track.id]: true }));
         ok.push(track);
       } catch (err) {
-        toast.error(
-          `${track.title}: ${err instanceof Error ? err.message : "не скачался"}`,
-        );
+        const message = err instanceof Error ? err.message : "не скачался";
+        noteYt("error", `${track.title}: ${message}`);
+        if (err instanceof DownloadError) ingestYtText(err.log, "error");
+        toast.error(`${track.title}: ${message}`);
       }
     }
     setZip((z) => ({ ...z, packing: true, current: "Упаковка ZIP", done: ok.length }));
@@ -378,6 +404,10 @@ export function OctavaApp() {
             />
           </div>
 
+          <div className="mt-3">
+            <YtConsole busy={busy || zip.open || Object.keys(progress).length > 0} />
+          </div>
+
           {caps && !caps.ytdlp ? (
             <p className="mt-3 text-sm text-danger">
               Движок yt-dlp не найден.{" "}
@@ -401,19 +431,6 @@ export function OctavaApp() {
                 ffmpeg={caps?.ffmpeg ?? false}
                 onChange={setFormat}
               />
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={visibleTracks.length === 0}
-                onClick={() => {
-                  if (selectedVisible.length === visibleTracks.length) clearSelected();
-                  else setSelected(visibleTracks.map((t) => t.id));
-                }}
-              >
-                {selectedVisible.length === visibleTracks.length && visibleTracks.length > 0
-                  ? "Снять все"
-                  : "Выбрать все"}
-              </Button>
               <Button
                 variant="secondary"
                 size="sm"
@@ -447,7 +464,30 @@ export function OctavaApp() {
           {visibleTracks.length === 0 ? (
             <EmptyState />
           ) : (
-            <ul className="mt-6 divide-y divide-line">
+            <div className="mt-6">
+              <div className="flex min-h-11 items-center gap-3 border-b border-line">
+                <Checkbox
+                  id="octava-select-all"
+                  checked={
+                    allVisibleSelected
+                      ? true
+                      : someVisibleSelected
+                        ? "indeterminate"
+                        : false
+                  }
+                  onCheckedChange={() => toggleAllVisible()}
+                  aria-label={allVisibleSelected ? "Снять все" : "Отметить все"}
+                />
+                <label
+                  htmlFor="octava-select-all"
+                  className="flex min-h-11 min-w-0 cursor-pointer items-center text-sm text-muted"
+                >
+                  {selectedVisible.length > 0
+                    ? `Выбрано ${selectedVisible.length} из ${visibleTracks.length}`
+                    : "Отметить все"}
+                </label>
+              </div>
+              <ul className="divide-y divide-line">
               {visibleTracks.map((track) => (
                 <TrackRow
                   key={track.id}
@@ -476,6 +516,7 @@ export function OctavaApp() {
                 />
               ))}
             </ul>
+            </div>
           )}
 
           {activePlaylistId === "history" && historyIds.length > 0 ? (

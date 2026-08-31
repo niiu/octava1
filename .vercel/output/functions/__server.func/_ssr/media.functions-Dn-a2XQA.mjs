@@ -1,7 +1,7 @@
-import { _ as resolveInput, c as exportFromBrowser, i as clearCookieFile, p as getCaps, t as ExtractorError, y as saveCookieFile } from "./extractor.server-BcKYwDyz.mjs";
-import { i as string, r as object, t as literal } from "../_libs/zod.mjs";
+import { S as saveCookieFile, _ as listLog, a as clearLog, b as resolveInput, c as dumpLogText, h as getCaps, i as clearCookieFile, t as ExtractorError, u as exportFromBrowser } from "./extractor.server-CxZG7wTz.mjs";
+import { a as string, i as object, n as literal, t as number } from "../_libs/zod.mjs";
 import { n as TSS_SERVER_FUNCTION, t as createServerFn } from "./ssr.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/media.functions-HDbFg1vC.js
+//#region node_modules/.nitro/vite/services/ssr/assets/media.functions-Dn-a2XQA.js
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
 	return Object.assign(splitImportFn, {
@@ -20,6 +20,21 @@ var getExtractorCaps_createServerFn_handler = createServerRpc({
 	filename: "src/lib/media.functions.ts"
 }, (opts) => getExtractorCaps.__executeServer(opts));
 var getExtractorCaps = createServerFn({ method: "GET" }).handler(getExtractorCaps_createServerFn_handler, async () => getCaps());
+var getExtractorLog_createServerFn_handler = createServerRpc({
+	id: "471041d278f466bbbcd911e755bffb17b696a719a103b0c38afabd3b26143b21",
+	name: "getExtractorLog",
+	filename: "src/lib/media.functions.ts"
+}, (opts) => getExtractorLog.__executeServer(opts));
+var getExtractorLog = createServerFn({ method: "GET" }).validator(object({ after: number().int().nonnegative().optional() })).handler(getExtractorLog_createServerFn_handler, async ({ data }) => listLog(data.after ?? 0));
+var clearExtractorLog_createServerFn_handler = createServerRpc({
+	id: "fa1365f86a87bf5ba813312150f394883694e110e7e93bd7ed294ffe3257599f",
+	name: "clearExtractorLog",
+	filename: "src/lib/media.functions.ts"
+}, (opts) => clearExtractorLog.__executeServer(opts));
+var clearExtractorLog = createServerFn({ method: "POST" }).handler(clearExtractorLog_createServerFn_handler, async () => {
+	clearLog();
+	return { ok: true };
+});
 var resolveMedia_createServerFn_handler = createServerRpc({
 	id: "7e356af630bd8842a70e21ae4d5acf69fbaf908febfd6b21f4ee151cf81033db",
 	name: "resolveMedia",
@@ -27,10 +42,24 @@ var resolveMedia_createServerFn_handler = createServerRpc({
 }, (opts) => resolveMedia.__executeServer(opts));
 var resolveMedia = createServerFn({ method: "POST" }).validator(inputSchema).handler(resolveMedia_createServerFn_handler, async ({ data }) => {
 	try {
-		return await resolveInput(data.input, data.cookies);
+		return {
+			ok: true,
+			result: await resolveInput(data.input, data.cookies),
+			log: dumpLogText(24)
+		};
 	} catch (err) {
-		if (err instanceof ExtractorError) throw new Error(err.message);
-		throw err;
+		if (err instanceof ExtractorError) return {
+			ok: false,
+			message: err.message,
+			code: err.code,
+			log: err.log || dumpLogText(40)
+		};
+		return {
+			ok: false,
+			message: err instanceof Error ? err.message : "Не удалось разобрать ссылку.",
+			code: "EXTRACT",
+			log: dumpLogText(40)
+		};
 	}
 });
 var saveYoutubeCookies_createServerFn_handler = createServerRpc({
@@ -52,4 +81,4 @@ var exportYoutubeCookies_createServerFn_handler = createServerRpc({
 }, (opts) => exportYoutubeCookies.__executeServer(opts));
 var exportYoutubeCookies = createServerFn({ method: "POST" }).validator(object({ consent: literal(true) })).handler(exportYoutubeCookies_createServerFn_handler, async () => exportFromBrowser());
 //#endregion
-export { clearYoutubeCookies_createServerFn_handler, exportYoutubeCookies_createServerFn_handler, getExtractorCaps_createServerFn_handler, resolveMedia_createServerFn_handler, saveYoutubeCookies_createServerFn_handler };
+export { clearExtractorLog_createServerFn_handler, clearYoutubeCookies_createServerFn_handler, exportYoutubeCookies_createServerFn_handler, getExtractorCaps_createServerFn_handler, getExtractorLog_createServerFn_handler, resolveMedia_createServerFn_handler, saveYoutubeCookies_createServerFn_handler };

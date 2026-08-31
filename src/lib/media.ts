@@ -22,6 +22,15 @@ export type ResolveResult =
   | { kind: "playlist"; id: string; title: string; channel: string; tracks: Track[] }
   | { kind: "search"; query: string; tracks: Track[] };
 
+export type YtLogLevel = "info" | "warn" | "error" | "ok";
+
+export type YtLogLine = {
+  id: number;
+  t: number;
+  level: YtLogLevel;
+  text: string;
+};
+
 export type ExtractorCaps = {
   ytdlp: boolean;
   ffmpeg: boolean;

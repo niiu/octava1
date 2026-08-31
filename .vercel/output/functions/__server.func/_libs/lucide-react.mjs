@@ -116,6 +116,16 @@ var Check = createLucideIcon("check", [["path", {
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
+var ChevronDown = createLucideIcon("chevron-down", [["path", {
+	d: "m6 9 6 6 6-6",
+	key: "qrunsl"
+}]]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
 var Cookie = createLucideIcon("cookie", [
 	["path", {
 		d: "M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5",
@@ -291,6 +301,16 @@ var LoaderCircle = createLucideIcon("loader-circle", [["path", {
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
+var Minus = createLucideIcon("minus", [["path", {
+	d: "M5 12h14",
+	key: "1ays0h"
+}]]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
 var Pause = createLucideIcon("pause", [["rect", {
 	x: "14",
 	y: "4",
@@ -363,6 +383,22 @@ var Search = createLucideIcon("search", [["path", {
 	cy: "11",
 	r: "8",
 	key: "4ej97u"
+}]]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var Terminal = createLucideIcon("terminal", [["polyline", {
+	points: "4 17 10 11 4 5",
+	key: "akl6gq"
+}], ["line", {
+	x1: "12",
+	x2: "20",
+	y1: "19",
+	y2: "19",
+	key: "q2wloq"
 }]]);
 /**
 * @license lucide-react v0.510.0 - ISC
@@ -445,4 +481,4 @@ var Youtube = createLucideIcon("youtube", [["path", {
 	key: "1jp15x"
 }]]);
 //#endregion
-export { Cookie as _, Search as a, Play as c, ListMusic as d, History as f, Copy as g, Download as h, Trash2 as i, Pause as l, FileUp as m, X as n, Save as o, FolderPlus as p, TriangleAlert as r, Plus as s, Youtube as t, LoaderCircle as u, Check as v, Archive as y };
+export { Archive as S, Download as _, Terminal as a, ChevronDown as b, Plus as c, Minus as d, LoaderCircle as f, FileUp as g, FolderPlus as h, Trash2 as i, Play as l, History as m, X as n, Search as o, ListMusic as p, TriangleAlert as r, Save as s, Youtube as t, Pause as u, Copy as v, Check as x, Cookie as y };

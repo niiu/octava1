@@ -3,9 +3,11 @@ import type { AudioFormat } from "./media";
 
 export class DownloadError extends Error {
   code: string;
-  constructor(code: string, message: string) {
+  log: string;
+  constructor(code: string, message: string, log = "") {
     super(message);
     this.code = code;
+    this.log = log;
   }
 }
 
@@ -29,14 +31,20 @@ export async function fetchAudioBlob(
   if (!res.ok) {
     let code = "HTTP";
     let message = `Не удалось скачать (${res.status})`;
+    let log = "";
     try {
-      const body = (await res.json()) as { code?: string; message?: string };
+      const body = (await res.json()) as {
+        code?: string;
+        message?: string;
+        log?: string;
+      };
       if (body.code) code = body.code;
       if (body.message) message = body.message;
+      if (body.log) log = body.log;
     } catch {
       /* keep defaults */
     }
-    throw new DownloadError(code, message);
+    throw new DownloadError(code, message, log);
   }
 
   const total = Number(res.headers.get("content-length") ?? 0);

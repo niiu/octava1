@@ -1,18 +1,22 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
 import { mkdtemp, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { Readable } from "node:stream";
 import type { AudioFormat, ExtractorCaps, ResolveResult, Track } from "./media";
 import { contentDisposition, mimeFor, safeFilename, thumbFor, watchUrl } from "./media";
 import { parseYoutubeInput, toYtdlpTarget } from "./youtube-url";
 import { normalizeCookieFile } from "./cookie-file";
 import { cookieStatus } from "./cookie-store.server";
-
-const execFileAsync = promisify(execFile);
+import {
+  appendLog,
+  dumpLogText,
+  feedLogChunk,
+  flushLogCarry,
+  sanitizeLog,
+} from "./yt-log.server";
 
 const MAX_PLAYLIST = 40;
 const JSON_TIMEOUT_MS = 45_000;
@@ -84,7 +88,6 @@ function baseArgs(cookieFile?: string | null): string[] {
   const args = [
     "--js-runtimes",
     "node",
-    "--no-warnings",
     "--no-check-certificates",
     "--newline",
   ];
@@ -118,7 +121,12 @@ async function withCookieFile<T>(
   }
 }
 
-async function runJson(args: string[], cookieFile?: string | null): Promise<YtEntry> {
+async function runYtDlp(
+  extraArgs: string[],
+  cookieFile: string | null,
+  timeoutMs: number,
+  collectStdout: boolean,
+): Promise<{ code: number | null; stdout: string; stderr: string; killed: boolean }> {
   const bin = ytDlpPath();
   if (!bin) {
     throw new ExtractorError(
@@ -127,28 +135,82 @@ async function runJson(args: string[], cookieFile?: string | null): Promise<YtEn
     );
   }
   const py = pythonBin();
-  try {
-    const { stdout } = await execFileAsync(py, [bin, ...baseArgs(cookieFile), ...args], {
-      timeout: JSON_TIMEOUT_MS,
-      maxBuffer: 16 * 1024 * 1024,
+  const args = [bin, ...baseArgs(cookieFile), ...extraArgs];
+  return new Promise((resolve, reject) => {
+    const child = spawn(py, args, {
       env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      stdio: ["ignore", collectStdout ? "pipe" : "ignore", "pipe"],
     });
-    const trimmed = stdout.trim();
+    let stdout = "";
+    let stderr = "";
+    const carry = { buf: "" };
+    let killed = false;
+    const timer = setTimeout(() => {
+      killed = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+    if (child.stdout) {
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf8");
+        if (stdout.length > 16 * 1024 * 1024) {
+          stdout = stdout.slice(-8 * 1024 * 1024);
+        }
+      });
+    }
+    child.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      stderr += text;
+      if (stderr.length > 64_000) stderr = stderr.slice(-48_000);
+      feedLogChunk(text, carry);
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      flushLogCarry(carry);
+      resolve({ code, stdout, stderr, killed });
+    });
+  });
+}
+
+async function runJson(args: string[], cookieFile?: string | null): Promise<YtEntry> {
+  try {
+    const proc = await runYtDlp(args, cookieFile ?? null, JSON_TIMEOUT_MS, true);
+    if (proc.killed) {
+      throw Object.assign(new Error("yt-dlp timeout"), {
+        killed: true,
+        stderr: proc.stderr,
+      });
+    }
+    if (proc.code !== 0) {
+      throw Object.assign(new Error("yt-dlp failed"), {
+        code: proc.code,
+        stderr: proc.stderr,
+        stdout: proc.stdout,
+      });
+    }
+    const trimmed = proc.stdout.trim();
     if (!trimmed) {
-      throw new ExtractorError("EMPTY", "YouTube вернул пустой ответ.");
+      throw new ExtractorError("EMPTY", "YouTube вернул пустой ответ.", proc.stderr);
     }
     return JSON.parse(trimmed) as YtEntry;
   } catch (err) {
+    if (err instanceof ExtractorError) throw err;
     throw mapExecError(err);
   }
 }
 
 export class ExtractorError extends Error {
   code: string;
-  constructor(code: string, message: string) {
+  log: string;
+  constructor(code: string, message: string, log = "") {
     super(message);
     this.code = code;
     this.name = "ExtractorError";
+    this.log = sanitizeLog(log);
+    appendLog("error", message);
   }
 }
 
@@ -160,36 +222,43 @@ function mapExecError(err: unknown): ExtractorError {
     killed?: boolean;
     code?: string | number;
   };
-  const blob = `${anyErr.stderr ?? ""} ${anyErr.stdout ?? ""} ${anyErr.message ?? ""}`;
+  const stderr = sanitizeLog(anyErr.stderr ?? "");
+  const blob = `${stderr} ${anyErr.stdout ?? ""} ${anyErr.message ?? ""}`;
+  let mapped: ExtractorError;
   if (/playlist does not exist/i.test(blob)) {
-    return new ExtractorError("NOT_FOUND", "Такого плейлиста нет или он закрыт.");
-  }
-  if (/video unavailable|private video|this video is not available/i.test(blob)) {
-    return new ExtractorError("UNAVAILABLE", "Ролик недоступен, удалён или скрыт.");
-  }
-  if (/sign in to confirm|not a bot/i.test(blob)) {
-    return new ExtractorError(
+    mapped = new ExtractorError("NOT_FOUND", "Такого плейлиста нет или он закрыт.", stderr);
+  } else if (/video unavailable|private video|this video is not available/i.test(blob)) {
+    mapped = new ExtractorError("UNAVAILABLE", "Ролик недоступен, удалён или скрыт.", stderr);
+  } else if (/sign in to confirm|not a bot/i.test(blob)) {
+    mapped = new ExtractorError(
       "BOTCHECK",
       "YouTube просит подтвердить, что вы не бот. Вставьте cookies YouTube в поле на главной — после согласия.",
+      stderr,
     );
-  }
-  if (/HTTP Error 403|403: Forbidden/i.test(blob)) {
-    return new ExtractorError(
+  } else if (/HTTP Error 403|403: Forbidden/i.test(blob)) {
+    mapped = new ExtractorError(
       "YOUTUBE_BLOCKED",
       "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube в поле на главной или запустите скрипт установки у себя.",
+      stderr,
+    );
+  } else if (anyErr.killed) {
+    mapped = new ExtractorError(
+      "TIMEOUT",
+      "YouTube слишком долго отвечает. Попробуйте ещё раз.",
+      stderr,
+    );
+  } else {
+    const first = blob
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.startsWith("ERROR:"));
+    mapped = new ExtractorError(
+      "EXTRACT",
+      first?.replace(/^ERROR:\s*/i, "") || "Не удалось разобрать ссылку.",
+      stderr,
     );
   }
-  if (anyErr.killed) {
-    return new ExtractorError("TIMEOUT", "YouTube слишком долго отвечает. Попробуйте ещё раз.");
-  }
-  const first = blob
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.startsWith("ERROR:"));
-  return new ExtractorError(
-    "EXTRACT",
-    first?.replace(/^ERROR:\s*/i, "") || "Не удалось разобрать ссылку.",
-  );
+  return mapped;
 }
 
 function asTrack(entry: YtEntry | null | undefined): Track | null {
@@ -221,7 +290,23 @@ function asTrack(entry: YtEntry | null | undefined): Track | null {
 }
 
 export async function resolveInput(raw: string, cookiesText?: string): Promise<ResolveResult> {
-  return withCookieFile(cookiesText, (cookieFile) => resolveWith(raw, cookieFile));
+  appendLog("info", `запрос: ${raw.trim().slice(0, 180)}`);
+  try {
+    const result = await withCookieFile(cookiesText, (cookieFile) =>
+      resolveWith(raw, cookieFile),
+    );
+    if (result.kind === "video") {
+      appendLog("ok", `ролик: ${result.track.title}`);
+    } else if (result.kind === "playlist") {
+      appendLog("ok", `плейлист «${result.title}» · ${result.tracks.length} треков`);
+    } else {
+      appendLog("ok", `поиск «${result.query}» · ${result.tracks.length} результатов`);
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof ExtractorError) throw err;
+    throw mapExecError(err);
+  }
 }
 
 async function resolveWith(raw: string, cookieFile: string | null): Promise<ResolveResult> {
@@ -333,10 +418,8 @@ export async function extractAudio(
     withSlot(async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
     const outTpl = path.join(dir, "%(id)s.%(ext)s");
-    const py = pythonBin();
+    appendLog("info", `скачивание ${videoId} · ${format}`);
     const args = [
-      bin,
-      ...baseArgs(cookieFile),
       ...formatArgs(format),
       "--no-playlist",
       "--no-part",
@@ -347,31 +430,25 @@ export async function extractAudio(
       watchUrl(videoId),
     ];
 
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(py, args, {
-        env: { ...process.env, PYTHONUNBUFFERED: "1" },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stderr = "";
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-      }, DOWNLOAD_TIMEOUT_MS);
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8");
-      });
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(Object.assign(new Error("yt-dlp failed"), { stderr, code }));
-      });
-    }).catch(async (err) => {
+    try {
+      const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false);
+      if (proc.killed) {
+        throw Object.assign(new Error("yt-dlp timeout"), {
+          killed: true,
+          stderr: proc.stderr,
+        });
+      }
+      if (proc.code !== 0) {
+        throw Object.assign(new Error("yt-dlp failed"), {
+          code: proc.code,
+          stderr: proc.stderr,
+        });
+      }
+    } catch (err) {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
+      if (err instanceof ExtractorError) throw err;
       throw mapExecError(err);
-    });
+    }
 
     const files = (await readdir(dir)).filter((f) => !f.endsWith(".part"));
     const audio = files[0];
@@ -390,6 +467,7 @@ export async function extractAudio(
     }
     const ext = path.extname(audio).slice(1) || (format === "mp3" ? "mp3" : "m4a");
     const titleGuess = audio.replace(/\.[^.]+$/, "") || videoId;
+    appendLog("ok", `готово ${videoId} · ${info.size} байт`);
     return {
       path: filePath,
       filename: `${safeFilename(titleGuess)}.${ext}`,
@@ -433,8 +511,9 @@ export function errorResponse(err: unknown): Response {
         : mapped.code === "BAD_ID" || mapped.code === "EMPTY" || mapped.code === "BAD_COOKIES"
           ? 400
           : 502;
+  const log = mapped.log || dumpLogText(40);
   return Response.json(
-    { code: mapped.code, message: mapped.message },
+    { code: mapped.code, message: mapped.message, log },
     { status },
   );
 }

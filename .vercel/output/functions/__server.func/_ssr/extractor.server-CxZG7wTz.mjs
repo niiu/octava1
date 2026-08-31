@@ -5,7 +5,7 @@ import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
-//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-BcKYwDyz.js
+//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-CxZG7wTz.js
 var FORMAT_LABEL = {
 	m4a: "M4A",
 	mp3: "MP3",
@@ -250,7 +250,7 @@ function expiryUnix(c) {
 	if (!Number.isFinite(raw) || raw <= 0) return 0;
 	return raw > 0xe8d4a51000 ? Math.round(raw / 1e3) : Math.round(raw);
 }
-var execFileAsync$1 = promisify(execFile);
+var execFileAsync = promisify(execFile);
 var BROWSERS = [
 	"chrome",
 	"chromium",
@@ -352,7 +352,7 @@ async function exportFromBrowser() {
 	if (available.length === 0) throw new Error("На этой машине нет профиля Chrome / Firefox / Brave. Вставьте cookies.txt в поле.");
 	const tmp = path.join(os.tmpdir(), `octava-browser-cookies-${process.pid}.txt`);
 	for (const browser of available) try {
-		await execFileAsync$1(py, [
+		await execFileAsync(py, [
 			bin,
 			"--js-runtimes",
 			"node",
@@ -380,7 +380,54 @@ async function exportFromBrowser() {
 	}
 	throw new Error("Не удалось взять cookies из браузера на этой машине. Вставьте cookies.txt в поле.");
 }
-var execFileAsync = promisify(execFile);
+var MAX_LINES = 180;
+var MAX_LINE = 500;
+var seq = 0;
+var lines = [];
+function sanitizeLog(raw) {
+	return raw.replace(/\u001b\[[0-9;]*m/g, "").replace(/\b(SID|HSID|SSID|APISID|SAPISID|__Secure-[A-Za-z0-9_-]+|LOGIN_INFO|VISITOR_INFO1_LIVE|YSC|PREF|CONSENT|SESSION_TOKEN)=[^\s;]*/gi, "$1=***").replace(/#HttpOnly_[^\n]*/g, "#HttpOnly_***").replace(/Cookie:\s*[^\n]+/gi, "Cookie: ***").replace(/--cookies(?:-from-browser)?\s+\S+/gi, "--cookies ***");
+}
+function classify(text) {
+	if (/ERROR:/i.test(text) || /HTTP Error\s+4\d\d/i.test(text)) return "error";
+	if (/WARNING:/i.test(text) || /Deprecated Feature/i.test(text)) return "warn";
+	if (/100%|Destination:|has already been downloaded/i.test(text)) return "ok";
+	return "info";
+}
+function appendLog(level, raw) {
+	const text = sanitizeLog(raw).replace(/\s+/g, " ").trim().slice(0, MAX_LINE);
+	if (!text) return;
+	seq += 1;
+	lines.push({
+		id: seq,
+		t: Date.now(),
+		level,
+		text
+	});
+	if (lines.length > MAX_LINES) lines.splice(0, lines.length - MAX_LINES);
+}
+function feedLogChunk(chunk, carry) {
+	const parts = (carry.buf + chunk).split(/\r?\n|\r/);
+	carry.buf = parts.pop() ?? "";
+	for (const part of parts) {
+		const text = sanitizeLog(part).trim();
+		if (text) appendLog(classify(text), text);
+	}
+}
+function flushLogCarry(carry) {
+	const text = sanitizeLog(carry.buf).trim();
+	carry.buf = "";
+	if (text) appendLog(classify(text), text);
+}
+function listLog(after = 0) {
+	if (after <= 0) return lines.slice();
+	return lines.filter((line) => line.id > after);
+}
+function dumpLogText(limit = 40) {
+	return lines.slice(-limit).map((line) => line.text).join("\n");
+}
+function clearLog() {
+	lines.length = 0;
+}
 var MAX_PLAYLIST = 40;
 var JSON_TIMEOUT_MS = 45e3;
 var DOWNLOAD_TIMEOUT_MS = 18e4;
@@ -421,7 +468,6 @@ function baseArgs(cookieFile) {
 	const args = [
 		"--js-runtimes",
 		"node",
-		"--no-warnings",
 		"--no-check-certificates",
 		"--newline"
 	];
@@ -453,47 +499,104 @@ async function withCookieFile(raw, fn) {
 		});
 	}
 }
-async function runJson(args, cookieFile) {
+async function runYtDlp(extraArgs, cookieFile, timeoutMs, collectStdout) {
 	const bin = ytDlpPath();
 	if (!bin) throw new ExtractorError("MISSING_YTDLP", "yt-dlp не установлен. Откройте раздел «Установка» и запустите скрипт.");
 	const py = pythonBin();
-	try {
-		const { stdout } = await execFileAsync(py, [
-			bin,
-			...baseArgs(cookieFile),
-			...args
-		], {
-			timeout: JSON_TIMEOUT_MS,
-			maxBuffer: 16777216,
+	const args = [
+		bin,
+		...baseArgs(cookieFile),
+		...extraArgs
+	];
+	return new Promise((resolve, reject) => {
+		const child = spawn(py, args, {
 			env: {
 				...process.env,
 				PYTHONUNBUFFERED: "1"
-			}
+			},
+			stdio: [
+				"ignore",
+				collectStdout ? "pipe" : "ignore",
+				"pipe"
+			]
 		});
-		const trimmed = stdout.trim();
-		if (!trimmed) throw new ExtractorError("EMPTY", "YouTube вернул пустой ответ.");
+		let stdout = "";
+		let stderr = "";
+		const carry = { buf: "" };
+		let killed = false;
+		const timer = setTimeout(() => {
+			killed = true;
+			child.kill("SIGKILL");
+		}, timeoutMs);
+		if (child.stdout) child.stdout.on("data", (chunk) => {
+			stdout += chunk.toString("utf8");
+			if (stdout.length > 16777216) stdout = stdout.slice(-8388608);
+		});
+		child.stderr?.on("data", (chunk) => {
+			const text = chunk.toString("utf8");
+			stderr += text;
+			if (stderr.length > 64e3) stderr = stderr.slice(-48e3);
+			feedLogChunk(text, carry);
+		});
+		child.on("error", (err) => {
+			clearTimeout(timer);
+			reject(err);
+		});
+		child.on("close", (code) => {
+			clearTimeout(timer);
+			flushLogCarry(carry);
+			resolve({
+				code,
+				stdout,
+				stderr,
+				killed
+			});
+		});
+	});
+}
+async function runJson(args, cookieFile) {
+	try {
+		const proc = await runYtDlp(args, cookieFile ?? null, JSON_TIMEOUT_MS, true);
+		if (proc.killed) throw Object.assign(/* @__PURE__ */ new Error("yt-dlp timeout"), {
+			killed: true,
+			stderr: proc.stderr
+		});
+		if (proc.code !== 0) throw Object.assign(/* @__PURE__ */ new Error("yt-dlp failed"), {
+			code: proc.code,
+			stderr: proc.stderr,
+			stdout: proc.stdout
+		});
+		const trimmed = proc.stdout.trim();
+		if (!trimmed) throw new ExtractorError("EMPTY", "YouTube вернул пустой ответ.", proc.stderr);
 		return JSON.parse(trimmed);
 	} catch (err) {
+		if (err instanceof ExtractorError) throw err;
 		throw mapExecError(err);
 	}
 }
 var ExtractorError = class extends Error {
 	code;
-	constructor(code, message) {
+	log;
+	constructor(code, message, log = "") {
 		super(message);
 		this.code = code;
 		this.name = "ExtractorError";
+		this.log = sanitizeLog(log);
+		appendLog("error", message);
 	}
 };
 function mapExecError(err) {
 	const anyErr = err;
-	const blob = `${anyErr.stderr ?? ""} ${anyErr.stdout ?? ""} ${anyErr.message ?? ""}`;
-	if (/playlist does not exist/i.test(blob)) return new ExtractorError("NOT_FOUND", "Такого плейлиста нет или он закрыт.");
-	if (/video unavailable|private video|this video is not available/i.test(blob)) return new ExtractorError("UNAVAILABLE", "Ролик недоступен, удалён или скрыт.");
-	if (/sign in to confirm|not a bot/i.test(blob)) return new ExtractorError("BOTCHECK", "YouTube просит подтвердить, что вы не бот. Вставьте cookies YouTube в поле на главной — после согласия.");
-	if (/HTTP Error 403|403: Forbidden/i.test(blob)) return new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube в поле на главной или запустите скрипт установки у себя.");
-	if (anyErr.killed) return new ExtractorError("TIMEOUT", "YouTube слишком долго отвечает. Попробуйте ещё раз.");
-	return new ExtractorError("EXTRACT", blob.split("\n").map((l) => l.trim()).find((l) => l.startsWith("ERROR:"))?.replace(/^ERROR:\s*/i, "") || "Не удалось разобрать ссылку.");
+	const stderr = sanitizeLog(anyErr.stderr ?? "");
+	const blob = `${stderr} ${anyErr.stdout ?? ""} ${anyErr.message ?? ""}`;
+	let mapped;
+	if (/playlist does not exist/i.test(blob)) mapped = new ExtractorError("NOT_FOUND", "Такого плейлиста нет или он закрыт.", stderr);
+	else if (/video unavailable|private video|this video is not available/i.test(blob)) mapped = new ExtractorError("UNAVAILABLE", "Ролик недоступен, удалён или скрыт.", stderr);
+	else if (/sign in to confirm|not a bot/i.test(blob)) mapped = new ExtractorError("BOTCHECK", "YouTube просит подтвердить, что вы не бот. Вставьте cookies YouTube в поле на главной — после согласия.", stderr);
+	else if (/HTTP Error 403|403: Forbidden/i.test(blob)) mapped = new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube в поле на главной или запустите скрипт установки у себя.", stderr);
+	else if (anyErr.killed) mapped = new ExtractorError("TIMEOUT", "YouTube слишком долго отвечает. Попробуйте ещё раз.", stderr);
+	else mapped = new ExtractorError("EXTRACT", blob.split("\n").map((l) => l.trim()).find((l) => l.startsWith("ERROR:"))?.replace(/^ERROR:\s*/i, "") || "Не удалось разобрать ссылку.", stderr);
+	return mapped;
 }
 function asTrack(entry) {
 	if (!entry?.id || entry.id === "_") return null;
@@ -516,7 +619,17 @@ function asTrack(entry) {
 	};
 }
 async function resolveInput(raw, cookiesText) {
-	return withCookieFile(cookiesText, (cookieFile) => resolveWith(raw, cookieFile));
+	appendLog("info", `запрос: ${raw.trim().slice(0, 180)}`);
+	try {
+		const result = await withCookieFile(cookiesText, (cookieFile) => resolveWith(raw, cookieFile));
+		if (result.kind === "video") appendLog("ok", `ролик: ${result.track.title}`);
+		else if (result.kind === "playlist") appendLog("ok", `плейлист «${result.title}» · ${result.tracks.length} треков`);
+		else appendLog("ok", `поиск «${result.query}» · ${result.tracks.length} результатов`);
+		return result;
+	} catch (err) {
+		if (err instanceof ExtractorError) throw err;
+		throw mapExecError(err);
+	}
 }
 async function resolveWith(raw, cookieFile) {
 	const parsed = parseYoutubeInput(raw);
@@ -605,15 +718,12 @@ function formatArgs(format) {
 }
 async function extractAudio(videoId, format, cookiesText) {
 	if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
-	const bin = ytDlpPath();
-	if (!bin) throw new ExtractorError("MISSING_YTDLP", "yt-dlp не установлен. Откройте раздел «Установка».");
+	if (!ytDlpPath()) throw new ExtractorError("MISSING_YTDLP", "yt-dlp не установлен. Откройте раздел «Установка».");
 	return withCookieFile(cookiesText, (cookieFile) => withSlot(async () => {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
 		const outTpl = path.join(dir, "%(id)s.%(ext)s");
-		const py = pythonBin();
+		appendLog("info", `скачивание ${videoId} · ${format}`);
 		const args = [
-			bin,
-			...baseArgs(cookieFile),
 			...formatArgs(format),
 			"--no-playlist",
 			"--no-part",
@@ -623,44 +733,24 @@ async function extractAudio(videoId, format, cookiesText) {
 			"--",
 			watchUrl(videoId)
 		];
-		await new Promise((resolve, reject) => {
-			const child = spawn(py, args, {
-				env: {
-					...process.env,
-					PYTHONUNBUFFERED: "1"
-				},
-				stdio: [
-					"ignore",
-					"pipe",
-					"pipe"
-				]
+		try {
+			const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false);
+			if (proc.killed) throw Object.assign(/* @__PURE__ */ new Error("yt-dlp timeout"), {
+				killed: true,
+				stderr: proc.stderr
 			});
-			let stderr = "";
-			const timer = setTimeout(() => {
-				child.kill("SIGKILL");
-			}, DOWNLOAD_TIMEOUT_MS);
-			child.stderr.on("data", (chunk) => {
-				stderr += chunk.toString("utf8");
+			if (proc.code !== 0) throw Object.assign(/* @__PURE__ */ new Error("yt-dlp failed"), {
+				code: proc.code,
+				stderr: proc.stderr
 			});
-			child.on("error", (err) => {
-				clearTimeout(timer);
-				reject(err);
-			});
-			child.on("close", (code) => {
-				clearTimeout(timer);
-				if (code === 0) resolve();
-				else reject(Object.assign(/* @__PURE__ */ new Error("yt-dlp failed"), {
-					stderr,
-					code
-				}));
-			});
-		}).catch(async (err) => {
+		} catch (err) {
 			await rm(dir, {
 				recursive: true,
 				force: true
 			}).catch(() => {});
+			if (err instanceof ExtractorError) throw err;
 			throw mapExecError(err);
-		});
+		}
 		const audio = (await readdir(dir)).filter((f) => !f.endsWith(".part"))[0];
 		if (!audio) {
 			await rm(dir, {
@@ -670,7 +760,8 @@ async function extractAudio(videoId, format, cookiesText) {
 			throw new ExtractorError("EMPTY_FILE", "Файл не был сохранён.");
 		}
 		const filePath = path.join(dir, audio);
-		if ((await stat(filePath)).size < 256) {
+		const info = await stat(filePath);
+		if (info.size < 256) {
 			await rm(dir, {
 				recursive: true,
 				force: true
@@ -678,9 +769,11 @@ async function extractAudio(videoId, format, cookiesText) {
 			throw new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube или запустите установщик у себя.");
 		}
 		const ext = path.extname(audio).slice(1) || (format === "mp3" ? "mp3" : "m4a");
+		const titleGuess = audio.replace(/\.[^.]+$/, "") || videoId;
+		appendLog("ok", `готово ${videoId} · ${info.size} байт`);
 		return {
 			path: filePath,
-			filename: `${safeFilename(audio.replace(/\.[^.]+$/, "") || videoId)}.${ext}`,
+			filename: `${safeFilename(titleGuess)}.${ext}`,
 			mime: mimeFor(format === "source" ? "source" : format),
 			cleanup: async () => {
 				await unlink(filePath).catch(() => {});
@@ -711,10 +804,12 @@ async function streamAudioFile(file) {
 function errorResponse(err) {
 	const mapped = err instanceof ExtractorError ? err : mapExecError(err);
 	const status = mapped.code === "MISSING_YTDLP" ? 503 : mapped.code === "NOT_FOUND" || mapped.code === "UNAVAILABLE" ? 404 : mapped.code === "BAD_ID" || mapped.code === "EMPTY" || mapped.code === "BAD_COOKIES" ? 400 : 502;
+	const log = mapped.log || dumpLogText(40);
 	return Response.json({
 		code: mapped.code,
-		message: mapped.message
+		message: mapped.message,
+		log
 	}, { status });
 }
 //#endregion
-export { resolveInput as _, cookieCountLabel as a, streamAudioFile as b, exportFromBrowser as c, formatBytes as d, formatDuration as f, normalizeCookieFile as g, newId as h, clearCookieFile as i, extensionFor as l, isLikelyCookieFile as m, FORMAT_LABEL as n, countCookieRows as o, getCaps as p, blobKey as r, errorResponse as s, ExtractorError as t, extractAudio as u, safeFilename as v, saveCookieFile as y };
+export { streamAudioFile as C, saveCookieFile as S, listLog as _, clearLog as a, resolveInput as b, dumpLogText as c, extensionFor as d, extractAudio as f, isLikelyCookieFile as g, getCaps as h, clearCookieFile as i, errorResponse as l, formatDuration as m, FORMAT_LABEL as n, cookieCountLabel as o, formatBytes as p, blobKey as r, countCookieRows as s, ExtractorError as t, exportFromBrowser as u, newId as v, safeFilename as x, normalizeCookieFile as y };
