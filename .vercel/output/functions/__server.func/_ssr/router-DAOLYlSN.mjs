@@ -9,7 +9,7 @@ import { n as Portal, r as Provider, t as Content2 } from "../_libs/@radix-ui/re
 import { n as clsx } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
 import { t as Toaster } from "../_libs/sonner.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-BHKUuE9r.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-DAOLYlSN.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -377,9 +377,9 @@ function RootDocument() {
 		})]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./routes-CDzdmsPn.mjs");
+var $$splitComponentImporter$1 = () => import("./routes-DvxaEM9L.mjs");
 var Route$2 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$1, "component") });
-var $$splitComponentImporter = () => import("./install-CnfZWBzS.mjs");
+var $$splitComponentImporter = () => import("./install-BXr26U65.mjs");
 var Route$1 = createFileRoute("/install")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
 var FORMATS = /* @__PURE__ */ new Set([
 	"m4a",

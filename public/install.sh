@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
 # Octava — автоустановка загрузчика аудио с YouTube
 # Запускать из корня проекта:  bash install.sh
+# По умолчанию поднимает службу в фоне (systemd --user на Ubuntu).
+# Передний план:  bash install.sh --foreground
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
+
+FOREGROUND=0
+for arg in "$@"; do
+  case "$arg" in
+    --foreground|-f) FOREGROUND=1 ;;
+    --help|-h)
+      echo "bash install.sh            поставить зависимости и запустить в фоне"
+      echo "bash install.sh --foreground   запустить на переднем плане"
+      exit 0
+      ;;
+  esac
+done
 
 say() { printf '\n==> %s\n' "$*"; }
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -86,16 +100,25 @@ else
   npm install
 fi
 
+chmod +x "$ROOT/bin/octava" "$ROOT/scripts/octava-serve.sh" 2>/dev/null || true
 export YT_DLP_PATH="$ROOT/bin/yt-dlp"
-export PATH="$ROOT/bin:$PATH"
+export PATH="$ROOT/bin:${PATH}"
 
-say "Готово. Поднимаю веб-морду на 0.0.0.0:8080"
-echo "Остановка — Ctrl+C. Cookies YouTube: поле на главной (экспорт с согласия) или cookies.txt в $ROOT"
-echo
-
-if grep -q '"dev"' package.json; then
-  npm run dev
-else
-  echo "В package.json нет скрипта dev."
-  exit 1
+if [ "$FOREGROUND" -eq 1 ]; then
+  say "Передний план. Остановка — Ctrl+C."
+  echo "Cookies YouTube: поле на главной или cookies.txt в $ROOT"
+  echo
+  exec "$ROOT/scripts/octava-serve.sh"
 fi
+
+say "Служба в фоне"
+"$ROOT/bin/octava" enable || "$ROOT/bin/octava" start
+
+echo
+echo "Управление:"
+echo "  octava start | stop | restart | status | logs"
+echo "  systemctl --user enable --now octava"
+echo "  systemctl --user stop octava"
+echo
+echo "Cookies YouTube: поле на главной (экспорт с согласия) или cookies.txt в $ROOT"
+"$ROOT/bin/octava" status || true

@@ -56,8 +56,7 @@ function InstallPage() {
           </h1>
           <p className="mt-3 max-w-xl text-muted">
             YouTube часто режет загрузки с облачных IP. Скрипт ставит yt-dlp, проверяет
-            ffmpeg и поднимает Octava у вас на машине — там скачивание и ZIP обычно
-            работают.
+            ffmpeg и поднимает Octava у вас как фоновую службу — как systemd на Ubuntu.
           </p>
         </div>
 
@@ -75,13 +74,27 @@ function InstallPage() {
               bash install.sh
             </pre>
             <p className="mt-2 text-muted">
-              Скрипт поставит зависимости Node, скачает yt-dlp в{" "}
+              Скрипт поставит зависимости, скачает yt-dlp в{" "}
               <span className="font-mono text-fg">bin/</span>, проверит ffmpeg и
-              запустит веб-морду.
+              запустит Octava в фоне (на Ubuntu — systemd --user).
             </p>
           </li>
           <li className="rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">
-            <p className="font-medium">3. Cookies YouTube</p>
+            <p className="font-medium">3. Управление службой</p>
+            <pre className="mt-2 overflow-x-auto rounded-md bg-raised px-3 py-2 font-mono text-xs leading-relaxed">
+              {`octava start
+octava stop
+octava status
+octava logs
+systemctl --user enable --now octava`}
+            </pre>
+            <p className="mt-2 text-muted">
+              После reboot служба поднимается сама, если выполнен enable. Передний
+              план: <span className="font-mono text-fg">bash install.sh --foreground</span>
+            </p>
+          </li>
+          <li className="rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">
+            <p className="font-medium">4. Cookies YouTube</p>
             <p className="mt-1 text-muted">
               На главной есть поле cookies и кнопка экспорта (с вашим согласием). Можно
               также положить cookies.txt в корень проекта — движок подхватит файл.

@@ -4,8 +4,8 @@ import { _ as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
 import { _ as Download, v as Copy, x as Check } from "../_libs/lucide-react.mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { n as Wordmark, t as Button } from "./logo-BybeK20-.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/install-CnfZWBzS.js
+import { n as Wordmark, t as Button } from "./logo-DUs96L7M.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/install-BXr26U65.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var FALLBACK_SCRIPT = `#!/usr/bin/env bash
@@ -54,7 +54,7 @@ function InstallPage() {
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						className: "mt-3 max-w-xl text-muted",
-						children: "YouTube часто режет загрузки с облачных IP. Скрипт ставит yt-dlp, проверяет ffmpeg и поднимает Octava у вас на машине — там скачивание и ZIP обычно работают."
+						children: "YouTube часто режет загрузки с облачных IP. Скрипт ставит yt-dlp, проверяет ffmpeg и поднимает Octava у вас как фоновую службу — как systemd на Ubuntu."
 					})
 				] }),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", {
@@ -91,14 +91,38 @@ function InstallPage() {
 								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 									className: "mt-2 text-muted",
 									children: [
-										"Скрипт поставит зависимости Node, скачает yt-dlp в",
+										"Скрипт поставит зависимости, скачает yt-dlp в",
 										" ",
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 											className: "font-mono text-fg",
 											children: "bin/"
 										}),
-										", проверит ffmpeg и запустит веб-морду."
+										", проверит ffmpeg и запустит Octava в фоне (на Ubuntu — systemd --user)."
 									]
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", {
+							className: "rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+									className: "font-medium",
+									children: "3. Управление службой"
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("pre", {
+									className: "mt-2 overflow-x-auto rounded-md bg-raised px-3 py-2 font-mono text-xs leading-relaxed",
+									children: `octava start
+octava stop
+octava status
+octava logs
+systemctl --user enable --now octava`
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+									className: "mt-2 text-muted",
+									children: ["После reboot служба поднимается сама, если выполнен enable. Передний план: ", /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+										className: "font-mono text-fg",
+										children: "bash install.sh --foreground"
+									})]
 								})
 							]
 						}),
@@ -106,7 +130,7 @@ function InstallPage() {
 							className: "rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]",
 							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "font-medium",
-								children: "3. Cookies YouTube"
+								children: "4. Cookies YouTube"
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "mt-1 text-muted",
 								children: "На главной есть поле cookies и кнопка экспорта (с вашим согласием). Можно также положить cookies.txt в корень проекта — движок подхватит файл."
