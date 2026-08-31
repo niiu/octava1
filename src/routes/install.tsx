@@ -81,10 +81,10 @@ function InstallPage() {
             </p>
           </li>
           <li className="rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">
-            <p className="font-medium">3. Cookies — если YouTube просит войти</p>
+            <p className="font-medium">3. Cookies YouTube</p>
             <p className="mt-1 text-muted">
-              Экспортируйте cookies.txt из браузера и положите в корень проекта. Octava
-              подхватит файл автоматически.
+              На главной есть поле cookies и кнопка экспорта (с вашим согласием). Можно
+              также положить cookies.txt в корень проекта — движок подхватит файл.
             </p>
           </li>
         </ol>

@@ -90,7 +90,7 @@ export YT_DLP_PATH="$ROOT/bin/yt-dlp"
 export PATH="$ROOT/bin:$PATH"
 
 say "Готово. Поднимаю веб-морду на 0.0.0.0:8080"
-echo "Остановка — Ctrl+C. Cookies: положите cookies.txt в $ROOT"
+echo "Остановка — Ctrl+C. Cookies YouTube: поле на главной (экспорт с согласия) или cookies.txt в $ROOT"
 echo
 
 if grep -q '"dev"' package.json; then

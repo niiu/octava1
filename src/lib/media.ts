@@ -27,6 +27,7 @@ export type ExtractorCaps = {
   ffmpeg: boolean;
   python: string | null;
   cookies: boolean;
+  cookieCount: number;
 };
 
 export const FORMAT_LABEL: Record<AudioFormat, string> = {

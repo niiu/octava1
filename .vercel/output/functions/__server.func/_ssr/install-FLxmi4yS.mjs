@@ -2,10 +2,10 @@ import { i as __toESM } from "../_runtime.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { _ as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
-import { f as Download, m as Check, p as Copy } from "../_libs/lucide-react.mjs";
+import { g as Copy, h as Download, v as Check } from "../_libs/lucide-react.mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { n as Wordmark, t as Button } from "./logo-DkvbWRMp.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/install-Dhgibw8q.js
+import { n as Wordmark, t as Button } from "./logo-BAxEXE8c.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/install-FLxmi4yS.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var FALLBACK_SCRIPT = `#!/usr/bin/env bash
@@ -106,10 +106,10 @@ function InstallPage() {
 							className: "rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]",
 							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "font-medium",
-								children: "3. Cookies — если YouTube просит войти"
+								children: "3. Cookies YouTube"
 							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 								className: "mt-1 text-muted",
-								children: "Экспортируйте cookies.txt из браузера и положите в корень проекта. Octava подхватит файл автоматически."
+								children: "На главной есть поле cookies и кнопка экспорта (с вашим согласием). Можно также положить cookies.txt в корень проекта — движок подхватит файл."
 							})]
 						})
 					]

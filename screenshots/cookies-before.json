@@ -7,13 +7,13 @@
       "status": 200,
       "title": "Octava",
       "hasCanvas": false,
-      "bodyTextLen": 620,
-      "bodyTextHash": "58fd55097f18d5ae0de9e8ee1d61d476fb16f915a319d5513bd5bc5665573530",
+      "bodyTextLen": 662,
+      "bodyTextHash": "ce140f957834fdcd6bc985e1e31d2177fd626cfe082d59208ee2f276468accd2",
       "bodyTextPrefix": "Octava Установка СБОРКИ Лента История МОИ Пока пусто — сложите т",
       "horizontalOverflow": false,
       "consoleErrors": [],
       "pageErrors": [],
-      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+      "screenshot": "/workspace/screenshots/cookies-before.png"
     },
     "mobile": {
       "width": 390,
@@ -21,16 +21,16 @@
       "status": 200,
       "title": "Octava",
       "hasCanvas": false,
-      "bodyTextLen": 620,
-      "bodyTextHash": "58fd55097f18d5ae0de9e8ee1d61d476fb16f915a319d5513bd5bc5665573530",
+      "bodyTextLen": 662,
+      "bodyTextHash": "ce140f957834fdcd6bc985e1e31d2177fd626cfe082d59208ee2f276468accd2",
       "bodyTextPrefix": "Octava Установка СБОРКИ Лента История МОИ Пока пусто — сложите т",
       "horizontalOverflow": false,
       "consoleErrors": [],
       "pageErrors": [],
-      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+      "screenshot": "/workspace/screenshots/cookies-before-mobile.png"
     }
   },
   "brandWarnings": [],
   "authWarnings": [],
-  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+  "verdictFile": "/workspace/screenshots/cookies-before.json"
 }

@@ -1,20 +1,20 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { a as extensionFor, c as formatDuration, f as safeFilename, n as FORMAT_LABEL, r as blobKey, s as formatBytes, u as newId } from "./extractor.server-BK2nXqml.mjs";
+import { a as cookieCountLabel, d as formatBytes, f as formatDuration, g as normalizeCookieFile, h as newId, l as extensionFor, m as isLikelyCookieFile, n as FORMAT_LABEL, o as countCookieRows, r as blobKey, v as safeFilename } from "./extractor.server-BcKYwDyz.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { _ as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime, n as CheckboxIndicator, t as Checkbox$1 } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
-import { i as string, r as object } from "../_libs/zod.mjs";
-import { a as Plus, c as LoaderCircle, d as FolderPlus, f as Download, h as Archive, i as Search, l as ListMusic, m as Check, o as Play, r as Trash2, s as Pause, t as X, u as History } from "../_libs/lucide-react.mjs";
+import { i as string, r as object, t as literal } from "../_libs/zod.mjs";
+import { _ as Cookie, a as Search, c as Play, d as ListMusic, f as History, g as Copy, h as Download, i as Trash2, l as Pause, m as FileUp, n as X, o as Save, p as FolderPlus, s as Plus, t as Youtube, u as LoaderCircle, v as Check, y as Archive } from "../_libs/lucide-react.mjs";
 import { a as DialogOverlay$1, i as DialogDescription$1, n as DialogClose, o as DialogPortal$1, r as DialogContent$1, s as DialogTitle$1, t as Dialog$1 } from "../_libs/@radix-ui/react-dialog+[...].mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { n as cn } from "./router-CoutIbKx.mjs";
-import { n as Wordmark, t as Button } from "./logo-DkvbWRMp.mjs";
+import { n as cn } from "./router-BtSTXcHu.mjs";
+import { n as Wordmark, t as Button } from "./logo-BAxEXE8c.mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { n as Root, t as Indicator } from "../_libs/radix-ui__react-progress.mjs";
 import { t as Root$1 } from "../_libs/radix-ui__react-separator.mjs";
 import { t as require_lib } from "../_libs/jszip+[...].mjs";
 import { n as create, t as persist } from "../_libs/zustand.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-C4oAVfGO.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-DGMvTqmZ.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var import_lib = /* @__PURE__ */ __toESM(require_lib());
@@ -97,6 +97,328 @@ var Separator = import_react.forwardRef(({ className, orientation = "horizontal"
 	...props
 }));
 Separator.displayName = Root$1.displayName;
+var Textarea = import_react.forwardRef(({ className, ...props }, ref) => {
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("textarea", {
+		className: cn("flex min-h-24 w-full rounded-md bg-raised px-4 py-3 font-mono text-xs leading-relaxed text-fg shadow-[var(--shadow-border)] transition-[box-shadow] duration-[var(--motion-quick)] placeholder:text-subtle", "focus-visible:outline-none focus-visible:shadow-[var(--shadow-border-hover)] focus-visible:ring-2 focus-visible:ring-accent/60", "disabled:cursor-not-allowed disabled:opacity-50", className),
+		ref,
+		...props
+	});
+});
+Textarea.displayName = "Textarea";
+var CONSENT_KEY = "octava-yt-cookies-consent";
+var COOKIES_KEY = "octava-yt-cookies";
+function loadCookieConsent() {
+	try {
+		return localStorage.getItem(CONSENT_KEY) === "1";
+	} catch {
+		return false;
+	}
+}
+function saveCookieConsent(ok) {
+	try {
+		if (ok) localStorage.setItem(CONSENT_KEY, "1");
+		else localStorage.removeItem(CONSENT_KEY);
+	} catch {}
+}
+function loadStoredCookies() {
+	try {
+		return localStorage.getItem(COOKIES_KEY) ?? "";
+	} catch {
+		return "";
+	}
+}
+function saveStoredCookies(raw) {
+	try {
+		const text = raw.trim();
+		if (text) localStorage.setItem(COOKIES_KEY, text);
+		else localStorage.removeItem(COOKIES_KEY);
+	} catch {}
+}
+function clearStoredCookies() {
+	try {
+		localStorage.removeItem(COOKIES_KEY);
+	} catch {}
+}
+function cookiePayload(field) {
+	const fromField = field.trim();
+	if (fromField) return fromField;
+	return loadStoredCookies().trim() || void 0;
+}
+var createSsrRpc = (functionId) => {
+	const url = "/_serverFn/" + functionId;
+	const serverFnMeta = { id: functionId };
+	const fn = async (...args) => {
+		return (await getServerFnById(functionId, { origin: "server" }))(...args);
+	};
+	return Object.assign(fn, {
+		url,
+		serverFnMeta,
+		[TSS_SERVER_FUNCTION]: true
+	});
+};
+var inputSchema = object({
+	input: string().trim().min(1, "Вставьте ссылку или запрос").max(500),
+	cookies: string().max(2e5).optional()
+});
+var getExtractorCaps = createServerFn({ method: "GET" }).handler(createSsrRpc("76b99b627836fa9ae6745eafd568542168a86d786d5abd33801d69699fa5d02a"));
+var resolveMedia = createServerFn({ method: "POST" }).validator(inputSchema).handler(createSsrRpc("7e356af630bd8842a70e21ae4d5acf69fbaf908febfd6b21f4ee151cf81033db"));
+var saveYoutubeCookies = createServerFn({ method: "POST" }).validator(object({ cookies: string().min(8).max(2e5) })).handler(createSsrRpc("6e5565706d3911bd6e2e3cfd69c38da374a83ee36be0a91b2ad7e105e7eb0184"));
+var clearYoutubeCookies = createServerFn({ method: "POST" }).handler(createSsrRpc("a21b784f4fc6be40740d08075b5e8b5b817d30c590e837e4cd420ee39db4587f"));
+var exportYoutubeCookies = createServerFn({ method: "POST" }).validator(object({ consent: literal(true) })).handler(createSsrRpc("95c635c2c518a34193e9ccc5e28496400ad795c19aa2397ebeb4435a5d2ee5fd"));
+var YT_EXPORT_BOOKMARKLET = "javascript:void(async function(){var h=location.hostname;if(!/(^|\\.)youtube\\.com$/.test(h)&&h!=='youtu.be'){alert('Откройте youtube.com и нажмите закладку снова');return;}var lines=['# Netscape HTTP Cookie File'];document.cookie.split(';').forEach(function(p){p=p.trim();var i=p.indexOf('=');if(i<1)return;var n=p.slice(0,i),v=p.slice(i+1);lines.push('.youtube.com\\tTRUE\\t/\\tTRUE\\t0\\t'+n+'\\t'+v);});var t=lines.join('\\n')+'\\n';try{await navigator.clipboard.writeText(t);alert('Cookies скопированы. Вернитесь в Octava и вставьте в поле.');}catch(e){prompt('Скопируйте cookies:',t);}})();";
+function CookiesPanel({ value, onChange, savedCount, onStatus }) {
+	const [exportOpen, setExportOpen] = (0, import_react.useState)(false);
+	const [agreed, setAgreed] = (0, import_react.useState)(false);
+	const [busy, setBusy] = (0, import_react.useState)(false);
+	const fileRef = (0, import_react.useRef)(null);
+	const areaRef = (0, import_react.useRef)(null);
+	const empty = !value.trim() && savedCount <= 0;
+	const rows = savedCount || countCookieRows(value);
+	const onStatusRef = (0, import_react.useRef)(onStatus);
+	onStatusRef.current = onStatus;
+	(0, import_react.useEffect)(() => {
+		setAgreed(loadCookieConsent());
+		const stored = loadStoredCookies();
+		if (stored) onStatusRef.current(countCookieRows(stored));
+	}, []);
+	async function persist(raw, source) {
+		setBusy(true);
+		try {
+			const normalized = normalizeCookieFile(raw);
+			const localCount = countCookieRows(normalized);
+			saveStoredCookies(normalized);
+			let count = localCount;
+			try {
+				count = (await saveYoutubeCookies({ data: { cookies: normalized } })).count;
+			} catch {}
+			onChange("");
+			onStatus(count);
+			toast.success(`${source}: ${cookieCountLabel(count)}`);
+		} catch (err) {
+			onChange(raw);
+			toast.error(err instanceof Error ? err.message : "Не удалось сохранить cookies");
+		} finally {
+			setBusy(false);
+		}
+	}
+	function fieldValue() {
+		return areaRef.current?.value ?? value;
+	}
+	function onPickFile(file) {
+		if (!file) return;
+		file.text().then((text) => persist(text, file.name));
+	}
+	async function clear() {
+		setBusy(true);
+		try {
+			clearStoredCookies();
+			await clearYoutubeCookies();
+			onChange("");
+			onStatus(0);
+			toast.message("Cookies удалены");
+		} catch (err) {
+			onChange("");
+			onStatus(0);
+			toast.message("Cookies удалены в браузере");
+		} finally {
+			setBusy(false);
+		}
+	}
+	function openExport() {
+		setAgreed(false);
+		setExportOpen(true);
+	}
+	async function copyBookmarklet() {
+		if (!agreed) {
+			toast.message("Нужно согласие, чтобы продолжить");
+			return;
+		}
+		saveCookieConsent(true);
+		try {
+			await navigator.clipboard.writeText(YT_EXPORT_BOOKMARKLET);
+			toast.success("Букмарклет скопирован — откройте YouTube и вставьте в закладки");
+		} catch {
+			toast.error("Не удалось скопировать букмарклет");
+		}
+	}
+	async function confirmExport() {
+		if (!agreed) {
+			toast.message("Нужно согласие, чтобы продолжить");
+			return;
+		}
+		saveCookieConsent(true);
+		setBusy(true);
+		try {
+			const status = await exportYoutubeCookies({ data: { consent: true } });
+			onChange("");
+			onStatus(status.count);
+			setExportOpen(false);
+			toast.success(`Экспорт из ${status.browser}: ${cookieCountLabel(status.count)}`);
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "Экспорт не удался");
+		} finally {
+			setBusy(false);
+		}
+	}
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+		"aria-labelledby": "octava-cookies-label",
+		"data-empty": empty ? "1" : "0",
+		className: "rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]",
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "flex flex-wrap items-center justify-between gap-2",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+					id: "octava-cookies-label",
+					htmlFor: "octava-cookies",
+					className: "flex items-center gap-2 text-sm font-medium",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Cookie, { className: "size-4 text-accent" }), "Cookies YouTube"]
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+					className: "text-xs text-muted",
+					children: empty ? "не заданы — без них YouTube часто режет загрузку" : `${cookieCountLabel(rows)} заданы`
+				})]
+			}),
+			empty ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "mt-2 text-sm text-muted",
+				children: "Поле пустое. Экспорт только после вашего согласия: букмарклет на youtube.com или cookies.txt."
+			}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "mt-2 text-sm text-muted",
+				children: "Значения скрыты. Вставьте новые в поле, чтобы заменить."
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Textarea, {
+				id: "octava-cookies",
+				name: "cookies",
+				ref: areaRef,
+				value,
+				rows: 3,
+				onChange: (e) => onChange(e.target.value),
+				onPaste: () => {
+					window.requestAnimationFrame(() => {
+						const live = areaRef.current?.value;
+						if (typeof live === "string") onChange(live);
+					});
+				},
+				onBlur: () => {
+					const live = fieldValue();
+					if (live.trim() && isLikelyCookieFile(live)) persist(live, "Поле");
+				},
+				onDrop: (e) => {
+					const file = e.dataTransfer.files?.[0];
+					if (!file) return;
+					e.preventDefault();
+					onPickFile(file);
+				},
+				spellCheck: false,
+				autoComplete: "off",
+				autoCorrect: "off",
+				placeholder: "# Netscape HTTP Cookie File — вставьте экспорт YouTube",
+				className: "mt-3 min-h-16 max-h-48"
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+				ref: fileRef,
+				type: "file",
+				accept: ".txt,.json,text/plain,application/json",
+				className: "sr-only",
+				tabIndex: -1,
+				"aria-hidden": "true",
+				onChange: (e) => {
+					onPickFile(e.target.files?.[0]);
+					e.currentTarget.value = "";
+				}
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+				className: "mt-3 flex flex-wrap gap-2",
+				children: [
+					empty ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+						id: "octava-cookies-export",
+						type: "button",
+						variant: "sage",
+						disabled: busy,
+						onClick: openExport,
+						children: [busy ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LoaderCircle, { className: "size-4 animate-spin" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Youtube, { className: "size-4" }), "Экспорт cookies YouTube"]
+					}) : null,
+					value.trim() ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+						id: "octava-cookies-save",
+						type: "button",
+						variant: "sage",
+						disabled: busy,
+						onClick: () => void persist(fieldValue(), "Поле"),
+						children: [busy ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LoaderCircle, { className: "size-4 animate-spin" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Save, { className: "size-4" }), "Сохранить"]
+					}) : null,
+					!empty ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+						id: "octava-cookies-clear",
+						type: "button",
+						variant: "secondary",
+						disabled: busy,
+						onClick: () => void clear(),
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Trash2, { className: "size-4" }), "Очистить"]
+					}) : null,
+					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+						id: "octava-cookies-file",
+						type: "button",
+						variant: "secondary",
+						disabled: busy,
+						onClick: () => fileRef.current?.click(),
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(FileUp, { className: "size-4" }), "Файл cookies.txt"]
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Dialog, {
+				open: exportOpen,
+				onOpenChange: setExportOpen,
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(DialogContent, {
+					className: "max-h-dvh overflow-y-auto sm:max-w-lg",
+					children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(DialogHeader, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(DialogTitle, { children: "Экспорт cookies YouTube" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(DialogDescription, { children: "Нужно ваше согласие. Octava не читает чужие вкладки сама: после согласия вы сами переносите cookies с youtube.com в поле ниже." })] }),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", {
+							className: "space-y-2 text-sm text-muted",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "1. Отметьте согласие." }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "2. Откройте YouTube и войдите в свой аккаунт." }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { children: "3. Скопируйте букмарклет, добавьте в закладки, нажмите его на youtube.com — затем вставьте результат в поле." })
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
+							className: "mt-4 flex cursor-pointer items-start gap-3 rounded-md bg-raised p-3 text-sm",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Checkbox, {
+								id: "octava-cookies-consent",
+								checked: agreed,
+								onCheckedChange: (v) => setAgreed(v === true),
+								className: "mt-0.5"
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Разрешаю Octava использовать мои cookies YouTube только для скачивания аудио в этом приложении. Не передавать их третьим лицам." })]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "mt-4 flex flex-wrap gap-2",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+									id: "octava-open-youtube",
+									type: "button",
+									variant: "secondary",
+									onClick: () => window.open("https://www.youtube.com/", "_blank", "noopener,noreferrer"),
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Youtube, { className: "size-4" }), "Открыть YouTube"]
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+									id: "octava-copy-bookmarklet",
+									type: "button",
+									variant: "secondary",
+									disabled: !agreed,
+									onClick: () => void copyBookmarklet(),
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Copy, { className: "size-4" }), "Скопировать букмарклет"]
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+									id: "octava-cookies-consent-ok",
+									type: "button",
+									disabled: !agreed || busy,
+									onClick: () => void confirmExport(),
+									children: [busy ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LoaderCircle, { className: "size-4 animate-spin" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Check, { className: "size-4" }), "Согласен, взять из браузера"]
+								})
+							]
+						})
+					]
+				})
+			})
+		]
+	});
+}
 var blobs = /* @__PURE__ */ new Map();
 var urls = /* @__PURE__ */ new Map();
 function getBlob(id, format) {
@@ -124,8 +446,17 @@ var DownloadError = class extends Error {
 		this.code = code;
 	}
 };
-async function fetchAudioBlob(id, format, onProgress, signal) {
-	const res = await fetch(`/api/audio?id=${encodeURIComponent(id)}&format=${encodeURIComponent(format)}`, { signal });
+async function fetchAudioBlob(id, format, onProgress, cookies, signal) {
+	const res = await fetch("/api/audio", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			id,
+			format,
+			cookies: cookies?.trim() ? cookies : void 0
+		}),
+		signal
+	});
 	if (!res.ok) {
 		let code = "HTTP";
 		let message = `Не удалось скачать (${res.status})`;
@@ -167,21 +498,6 @@ async function fetchAudioBlob(id, format, onProgress, signal) {
 	onProgress?.(1);
 	return blob;
 }
-var createSsrRpc = (functionId) => {
-	const url = "/_serverFn/" + functionId;
-	const serverFnMeta = { id: functionId };
-	const fn = async (...args) => {
-		return (await getServerFnById(functionId, { origin: "server" }))(...args);
-	};
-	return Object.assign(fn, {
-		url,
-		serverFnMeta,
-		[TSS_SERVER_FUNCTION]: true
-	});
-};
-var inputSchema = object({ input: string().trim().min(1, "Вставьте ссылку или запрос").max(500) });
-var getExtractorCaps = createServerFn({ method: "GET" }).handler(createSsrRpc("76b99b627836fa9ae6745eafd568542168a86d786d5abd33801d69699fa5d02a"));
-var resolveMedia = createServerFn({ method: "POST" }).validator(inputSchema).handler(createSsrRpc("7e356af630bd8842a70e21ae4d5acf69fbaf908febfd6b21f4ee151cf81033db"));
 async function packTracksZip(tracks, format, onProgress) {
 	const zip = new import_lib.default();
 	const skipped = [];
@@ -302,6 +618,8 @@ function OctavaApp() {
 	});
 	const [progress, setProgress] = (0, import_react.useState)({});
 	const [ready, setReady] = (0, import_react.useState)({});
+	const [cookies, setCookies] = (0, import_react.useState)("");
+	const [cookieCount, setCookieCount] = (0, import_react.useState)(0);
 	const format = useLibrary((s) => s.format);
 	const setFormat = useLibrary((s) => s.setFormat);
 	const catalog = useLibrary((s) => s.catalog);
@@ -321,11 +639,17 @@ function OctavaApp() {
 		useLibrary.persist.rehydrate();
 	}, []);
 	(0, import_react.useEffect)(() => {
-		getExtractorCaps().then(setCaps).catch(() => setCaps({
+		const local = countCookieRows(loadStoredCookies());
+		if (local > 0) setCookieCount(local);
+		getExtractorCaps().then((next) => {
+			setCaps(next);
+			setCookieCount((prev) => Math.max(prev, next.cookieCount, local));
+		}).catch(() => setCaps({
 			ytdlp: false,
 			ffmpeg: false,
 			python: null,
-			cookies: false
+			cookies: false,
+			cookieCount: 0
 		}));
 	}, []);
 	const inboxTracks = (0, import_react.useMemo)(() => {
@@ -353,7 +677,10 @@ function OctavaApp() {
 		if (!q) return;
 		setBusy(true);
 		try {
-			const next = await resolveMedia({ data: { input: q } });
+			const next = await resolveMedia({ data: {
+				input: q,
+				cookies: cookiePayload(cookies)
+			} });
 			setResult(next);
 			const tracks = next.kind === "video" ? [next.track] : next.tracks;
 			remember(tracks);
@@ -381,7 +708,7 @@ function OctavaApp() {
 					...p,
 					[track.id]: ratio
 				}));
-			});
+			}, cookiePayload(cookies));
 			setReady((r) => ({
 				...r,
 				[track.id]: true
@@ -431,7 +758,7 @@ function OctavaApp() {
 						...p,
 						[track.id]: ratio
 					}));
-				});
+				}, cookiePayload(cookies));
 				setReady((r) => ({
 					...r,
 					[track.id]: true
@@ -595,6 +922,22 @@ function OctavaApp() {
 									children: [busy ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(LoaderCircle, { className: "size-4 animate-spin" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Search, { className: "size-4" }), "Найти"]
 								})
 							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "mt-3",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CookiesPanel, {
+								value: cookies,
+								onChange: setCookies,
+								savedCount: cookieCount,
+								onStatus: (count) => {
+									setCookieCount(count);
+									setCaps((prev) => prev ? {
+										...prev,
+										cookies: count > 0,
+										cookieCount: count
+									} : prev);
+								}
+							})
 						}),
 						caps && !caps.ytdlp ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 							className: "mt-3 text-sm text-danger",

@@ -1,15 +1,15 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { i as errorResponse, o as extractAudio, p as streamAudioFile } from "./extractor.server-BK2nXqml.mjs";
+import { b as streamAudioFile, s as errorResponse, u as extractAudio } from "./extractor.server-BcKYwDyz.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { f as createRouter, g as createRootRoute, h as createFileRoute, l as Scripts, m as lazyRouteComponent, p as Outlet, u as HeadContent, v as useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
 import { a as union, i as string, n as number, r as object, t as literal } from "../_libs/zod.mjs";
-import { n as TriangleAlert } from "../_libs/lucide-react.mjs";
+import { r as TriangleAlert } from "../_libs/lucide-react.mjs";
 import { n as Portal, r as Provider, t as Content2 } from "../_libs/@radix-ui/react-tooltip+[...].mjs";
 import { n as clsx } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
 import { t as Toaster } from "../_libs/sonner.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-CoutIbKx.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-BtSTXcHu.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -299,7 +299,7 @@ var TooltipContent = import_react.forwardRef(({ className, sideOffset = 6, ...pr
 	...props
 }) }));
 TooltipContent.displayName = Content2.displayName;
-var styles_default = "/assets/styles-BdtoV1Uc.css";
+var styles_default = "/assets/styles-eRQmaB1W.css";
 var APP_NAME = "Octava";
 var Route$3 = createRootRoute({
 	head: () => ({
@@ -377,27 +377,43 @@ function RootDocument() {
 		})]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./routes-C4oAVfGO.mjs");
+var $$splitComponentImporter$1 = () => import("./routes-DGMvTqmZ.mjs");
 var Route$2 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$1, "component") });
-var $$splitComponentImporter = () => import("./install-Dhgibw8q.mjs");
+var $$splitComponentImporter = () => import("./install-FLxmi4yS.mjs");
 var Route$1 = createFileRoute("/install")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
 var FORMATS = /* @__PURE__ */ new Set([
 	"m4a",
 	"mp3",
 	"source"
 ]);
-var Route = createFileRoute("/api/audio")({ server: { handlers: { GET: async ({ request }) => {
-	const url = new URL(request.url);
-	const id = url.searchParams.get("id") ?? "";
-	const formatRaw = url.searchParams.get("format") ?? "m4a";
-	const format = FORMATS.has(formatRaw) ? formatRaw : "m4a";
-	try {
-		const file = await extractAudio(id, format);
-		return await streamAudioFile(file);
-	} catch (err) {
-		return errorResponse(err);
+function parseFormat(raw) {
+	const formatRaw = raw ?? "m4a";
+	return FORMATS.has(formatRaw) ? formatRaw : "m4a";
+}
+async function handleAudio(id, format, cookies) {
+	const file = await extractAudio(id, format, cookies);
+	return streamAudioFile(file);
+}
+var Route = createFileRoute("/api/audio")({ server: { handlers: {
+	GET: async ({ request }) => {
+		const url = new URL(request.url);
+		const id = url.searchParams.get("id") ?? "";
+		const format = parseFormat(url.searchParams.get("format"));
+		try {
+			return await handleAudio(id, format);
+		} catch (err) {
+			return errorResponse(err);
+		}
+	},
+	POST: async ({ request }) => {
+		try {
+			const body = await request.json();
+			return await handleAudio(typeof body.id === "string" ? body.id : "", parseFormat(typeof body.format === "string" ? body.format : "m4a"), typeof body.cookies === "string" ? body.cookies : void 0);
+		} catch (err) {
+			return errorResponse(err);
+		}
 	}
-} } } });
+} } });
 var rootRouteChildren = {
 	IndexRoute: Route$2.update({
 		id: "/",

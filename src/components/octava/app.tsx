@@ -28,9 +28,12 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Wordmark } from "@/components/octava/logo";
+import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { getBlobUrl, hasBlob } from "@/lib/blobs";
 import { fetchAudioBlob } from "@/lib/download-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
+import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
+import { countCookieRows } from "@/lib/cookie-file";
 import type { AudioFormat, ExtractorCaps, ResolveResult, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
@@ -73,6 +76,8 @@ export function OctavaApp() {
   });
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [ready, setReady] = useState<Record<string, boolean>>({});
+  const [cookies, setCookies] = useState("");
+  const [cookieCount, setCookieCount] = useState(0);
 
   const format = useLibrary((s) => s.format);
   const setFormat = useLibrary((s) => s.setFormat);
@@ -95,9 +100,22 @@ export function OctavaApp() {
   }, []);
 
   useEffect(() => {
+    const local = countCookieRows(loadStoredCookies());
+    if (local > 0) setCookieCount(local);
     void getExtractorCaps()
-      .then(setCaps)
-      .catch(() => setCaps({ ytdlp: false, ffmpeg: false, python: null, cookies: false }));
+      .then((next) => {
+        setCaps(next);
+        setCookieCount((prev) => Math.max(prev, next.cookieCount, local));
+      })
+      .catch(() =>
+        setCaps({
+          ytdlp: false,
+          ffmpeg: false,
+          python: null,
+          cookies: false,
+          cookieCount: 0,
+        }),
+      );
   }, []);
 
   const inboxTracks = useMemo(() => {
@@ -124,7 +142,7 @@ export function OctavaApp() {
     if (!q) return;
     setBusy(true);
     try {
-      const next = await resolveMedia({ data: { input: q } });
+      const next = await resolveMedia({ data: { input: q, cookies: cookiePayload(cookies) } });
       setResult(next);
       const tracks = next.kind === "video" ? [next.track] : next.tracks;
       remember(tracks);
@@ -150,7 +168,7 @@ export function OctavaApp() {
     try {
       const blob = await fetchAudioBlob(track.id, format, (ratio) => {
         setProgress((p) => ({ ...p, [track.id]: ratio }));
-      });
+      }, cookiePayload(cookies));
       setReady((r) => ({ ...r, [track.id]: true }));
       const ext = extensionFor(format, blob.type);
       saveBlob(blob, `${safeFilename(track.title)}.${ext}`);
@@ -184,7 +202,7 @@ export function OctavaApp() {
       try {
         await fetchAudioBlob(track.id, format, (ratio) => {
           setProgress((p) => ({ ...p, [track.id]: ratio }));
-        });
+        }, cookiePayload(cookies));
         setReady((r) => ({ ...r, [track.id]: true }));
         ok.push(track);
       } catch (err) {
@@ -343,6 +361,22 @@ export function OctavaApp() {
               Найти
             </Button>
           </form>
+
+          <div className="mt-3">
+            <CookiesPanel
+              value={cookies}
+              onChange={setCookies}
+              savedCount={cookieCount}
+              onStatus={(count) => {
+                setCookieCount(count);
+                setCaps((prev) =>
+                  prev
+                    ? { ...prev, cookies: count > 0, cookieCount: count }
+                    : prev,
+                );
+              }}
+            />
+          </div>
 
           {caps && !caps.ytdlp ? (
             <p className="mt-3 text-sm text-danger">

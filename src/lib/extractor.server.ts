@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
-import { mkdtemp, readdir, rm, stat, unlink } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -9,6 +9,8 @@ import { Readable } from "node:stream";
 import type { AudioFormat, ExtractorCaps, ResolveResult, Track } from "./media";
 import { contentDisposition, mimeFor, safeFilename, thumbFor, watchUrl } from "./media";
 import { parseYoutubeInput, toYtdlpTarget } from "./youtube-url";
+import { normalizeCookieFile } from "./cookie-file";
+import { cookieStatus } from "./cookie-store.server";
 
 const execFileAsync = promisify(execFile);
 
@@ -68,11 +70,17 @@ function cookiesPath(): string | null {
 export async function getCaps(): Promise<ExtractorCaps> {
   const ytdlp = Boolean(ytDlpPath());
   const ffmpeg = existsSync("/usr/local/bin/ffmpeg") || existsSync("/usr/bin/ffmpeg");
-  const cookies = Boolean(cookiesPath());
-  return { ytdlp, ffmpeg, python: pythonBin(), cookies };
+  const ck = await cookieStatus();
+  return {
+    ytdlp,
+    ffmpeg,
+    python: pythonBin(),
+    cookies: ck.present,
+    cookieCount: ck.count,
+  };
 }
 
-function baseArgs(): string[] {
+function baseArgs(cookieFile?: string | null): string[] {
   const args = [
     "--js-runtimes",
     "node",
@@ -80,12 +88,37 @@ function baseArgs(): string[] {
     "--no-check-certificates",
     "--newline",
   ];
-  const cookies = cookiesPath();
-  if (cookies) args.push("--cookies", cookies);
+  const file = cookieFile === undefined ? cookiesPath() : cookieFile;
+  if (file) args.push("--cookies", file);
   return args;
 }
 
-async function runJson(args: string[]): Promise<YtEntry> {
+async function withCookieFile<T>(
+  raw: string | undefined,
+  fn: (cookieFile: string | null) => Promise<T>,
+): Promise<T> {
+  const text = raw?.trim();
+  if (!text) return fn(cookiesPath());
+  let normalized: string;
+  try {
+    normalized = normalizeCookieFile(text);
+  } catch {
+    throw new ExtractorError(
+      "BAD_COOKIES",
+      "Не похоже на cookies.txt. Вставьте Netscape-файл или JSON экспорта.",
+    );
+  }
+  const dir = await mkdtemp(path.join(os.tmpdir(), "octava-ck-"));
+  const file = path.join(dir, "cookies.txt");
+  await writeFile(file, normalized, { encoding: "utf8", mode: 0o600 });
+  try {
+    return await fn(file);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function runJson(args: string[], cookieFile?: string | null): Promise<YtEntry> {
   const bin = ytDlpPath();
   if (!bin) {
     throw new ExtractorError(
@@ -95,7 +128,7 @@ async function runJson(args: string[]): Promise<YtEntry> {
   }
   const py = pythonBin();
   try {
-    const { stdout } = await execFileAsync(py, [bin, ...baseArgs(), ...args], {
+    const { stdout } = await execFileAsync(py, [bin, ...baseArgs(cookieFile), ...args], {
       timeout: JSON_TIMEOUT_MS,
       maxBuffer: 16 * 1024 * 1024,
       env: { ...process.env, PYTHONUNBUFFERED: "1" },
@@ -137,13 +170,13 @@ function mapExecError(err: unknown): ExtractorError {
   if (/sign in to confirm|not a bot/i.test(blob)) {
     return new ExtractorError(
       "BOTCHECK",
-      "YouTube просит подтвердить, что вы не бот. На своей машине положите cookies.txt в корень проекта — см. раздел «Установка».",
+      "YouTube просит подтвердить, что вы не бот. Вставьте cookies YouTube в поле на главной — после согласия.",
     );
   }
   if (/HTTP Error 403|403: Forbidden/i.test(blob)) {
     return new ExtractorError(
       "YOUTUBE_BLOCKED",
-      "YouTube отклонил загрузку с этого сервера. С домашней сети это обычно проходит — запустите скрипт установки.",
+      "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube в поле на главной или запустите скрипт установки у себя.",
     );
   }
   if (anyErr.killed) {
@@ -187,37 +220,41 @@ function asTrack(entry: YtEntry | null | undefined): Track | null {
   };
 }
 
-export async function resolveInput(raw: string): Promise<ResolveResult> {
+export async function resolveInput(raw: string, cookiesText?: string): Promise<ResolveResult> {
+  return withCookieFile(cookiesText, (cookieFile) => resolveWith(raw, cookieFile));
+}
+
+async function resolveWith(raw: string, cookieFile: string | null): Promise<ResolveResult> {
   const parsed = parseYoutubeInput(raw);
   if (parsed.kind === "empty") {
     throw new ExtractorError("EMPTY", "Вставьте ссылку или поисковый запрос.");
   }
 
   if (parsed.kind === "search") {
-    const data = await runJson([
-      "-J",
-      "--flat-playlist",
-      "--playlist-end",
-      "8",
-      toYtdlpTarget(parsed),
-    ]);
+    const data = await runJson(
+      ["-J", "--flat-playlist", "--playlist-end", "8", toYtdlpTarget(parsed)],
+      cookieFile,
+    );
     const tracks = (data.entries ?? []).map(asTrack).filter((t): t is Track => Boolean(t));
     return { kind: "search", query: parsed.query, tracks };
   }
 
   if (parsed.kind === "playlist" || (parsed.kind === "video" && parsed.playlistId)) {
     const playlistId = parsed.kind === "playlist" ? parsed.playlistId : parsed.playlistId!;
-    const data = await runJson([
-      "-J",
-      "--yes-playlist",
-      "--flat-playlist",
-      "--playlist-end",
-      String(MAX_PLAYLIST),
-      `https://www.youtube.com/playlist?list=${playlistId}`,
-    ]);
+    const data = await runJson(
+      [
+        "-J",
+        "--yes-playlist",
+        "--flat-playlist",
+        "--playlist-end",
+        String(MAX_PLAYLIST),
+        `https://www.youtube.com/playlist?list=${playlistId}`,
+      ],
+      cookieFile,
+    );
     const tracks = (data.entries ?? []).map(asTrack).filter((t): t is Track => Boolean(t));
     if (tracks.length === 0 && parsed.kind === "video") {
-      return resolveVideo(parsed.videoId);
+      return resolveVideo(parsed.videoId, cookieFile);
     }
     return {
       kind: "playlist",
@@ -228,16 +265,14 @@ export async function resolveInput(raw: string): Promise<ResolveResult> {
     };
   }
 
-  return resolveVideo(parsed.videoId);
+  return resolveVideo(parsed.videoId, cookieFile);
 }
 
-async function resolveVideo(videoId: string): Promise<ResolveResult> {
-  const data = await runJson([
-    "-J",
-    "--no-playlist",
-    "--skip-download",
-    watchUrl(videoId),
-  ]);
+async function resolveVideo(videoId: string, cookieFile: string | null): Promise<ResolveResult> {
+  const data = await runJson(
+    ["-J", "--no-playlist", "--skip-download", watchUrl(videoId)],
+    cookieFile,
+  );
   const track = asTrack(data);
   if (!track) {
     throw new ExtractorError("NOT_FOUND", "Не удалось получить данные ролика.");
@@ -278,7 +313,11 @@ function formatArgs(format: AudioFormat): string[] {
   return ["-f", "bestaudio[ext=m4a]/bestaudio/best"];
 }
 
-export async function extractAudio(videoId: string, format: AudioFormat): Promise<AudioFile> {
+export async function extractAudio(
+  videoId: string,
+  format: AudioFormat,
+  cookiesText?: string,
+): Promise<AudioFile> {
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
     throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
   }
@@ -290,13 +329,14 @@ export async function extractAudio(videoId: string, format: AudioFormat): Promis
     );
   }
 
-  return withSlot(async () => {
+  return withCookieFile(cookiesText, (cookieFile) =>
+    withSlot(async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
     const outTpl = path.join(dir, "%(id)s.%(ext)s");
     const py = pythonBin();
     const args = [
       bin,
-      ...baseArgs(),
+      ...baseArgs(cookieFile),
       ...formatArgs(format),
       "--no-playlist",
       "--no-part",
@@ -345,7 +385,7 @@ export async function extractAudio(videoId: string, format: AudioFormat): Promis
       await rm(dir, { recursive: true, force: true }).catch(() => {});
       throw new ExtractorError(
         "YOUTUBE_BLOCKED",
-        "YouTube отклонил загрузку с этого сервера. Запустите Octava у себя через скрипт установки.",
+        "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube или запустите установщик у себя.",
       );
     }
     const ext = path.extname(audio).slice(1) || (format === "mp3" ? "mp3" : "m4a");
@@ -359,7 +399,8 @@ export async function extractAudio(videoId: string, format: AudioFormat): Promis
         await rm(dir, { recursive: true, force: true }).catch(() => {});
       },
     };
-  });
+  }),
+  );
 }
 
 export async function streamAudioFile(file: AudioFile): Promise<Response> {
@@ -389,7 +430,7 @@ export function errorResponse(err: unknown): Response {
       ? 503
       : mapped.code === "NOT_FOUND" || mapped.code === "UNAVAILABLE"
         ? 404
-        : mapped.code === "BAD_ID" || mapped.code === "EMPTY"
+        : mapped.code === "BAD_ID" || mapped.code === "EMPTY" || mapped.code === "BAD_COOKIES"
           ? 400
           : 502;
   return Response.json(

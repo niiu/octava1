@@ -13,12 +13,19 @@ export async function fetchAudioBlob(
   id: string,
   format: AudioFormat,
   onProgress?: (ratio: number) => void,
+  cookies?: string,
   signal?: AbortSignal,
 ): Promise<Blob> {
-  const res = await fetch(
-    `/api/audio?id=${encodeURIComponent(id)}&format=${encodeURIComponent(format)}`,
-    { signal },
-  );
+  const res = await fetch("/api/audio", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id,
+      format,
+      cookies: cookies?.trim() ? cookies : undefined,
+    }),
+    signal,
+  });
   if (!res.ok) {
     let code = "HTTP";
     let message = `Не удалось скачать (${res.status})`;

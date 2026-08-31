@@ -2,10 +2,10 @@ import { Readable } from "node:stream";
 import { createReadStream, existsSync } from "node:fs";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, readdir, rm, stat, unlink } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
-//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-BK2nXqml.js
+//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-BcKYwDyz.js
 var FORMAT_LABEL = {
 	m4a: "M4A",
 	mp3: "MP3",
@@ -147,6 +147,239 @@ function toYtdlpTarget(parsed) {
 	if (parsed.playlistId) return `https://www.youtube.com/watch?v=${parsed.videoId}&list=${parsed.playlistId}`;
 	return `https://www.youtube.com/watch?v=${parsed.videoId}`;
 }
+var NETSCAPE_HEADER = "# Netscape HTTP Cookie File\n";
+function cookieCountLabel(n) {
+	const n10 = n % 10;
+	const n100 = n % 100;
+	if (n10 === 1 && n100 !== 11) return `${n} запись`;
+	if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return `${n} записи`;
+	return `${n} записей`;
+}
+function isLikelyCookieFile(raw) {
+	const text = stripBom(raw).trim();
+	if (!text) return false;
+	if (looksLikeJson(text)) try {
+		return jsonCookies(text).length > 0;
+	} catch {
+		return false;
+	}
+	if (/#\s*(Netscape )?HTTP Cookie File/i.test(text)) return true;
+	return netscapeRowCount(text) > 0;
+}
+function countCookieRows(raw) {
+	const text = stripBom(raw).trim();
+	if (!text) return 0;
+	if (looksLikeJson(text)) try {
+		return jsonCookies(text).length;
+	} catch {
+		return 0;
+	}
+	return netscapeRowCount(text);
+}
+function normalizeCookieFile(raw) {
+	const text = stripBom(raw).trim();
+	if (!text) throw new Error("Пустой файл cookies");
+	if (looksLikeJson(text)) {
+		const cookies = jsonCookies(text);
+		if (cookies.length === 0) throw new Error("В файле нет cookie-записей");
+		return `${NETSCAPE_HEADER}${cookies.map(toNetscapeLine).join("\n")}\n`;
+	}
+	if (netscapeRowCount(text) === 0) throw new Error("Не похоже на cookies.txt. Вставьте Netscape-файл или JSON экспорта.");
+	if (/#\s*(Netscape )?HTTP Cookie File/i.test(text)) return text.endsWith("\n") ? text : `${text}\n`;
+	return `${NETSCAPE_HEADER}${text}${text.endsWith("\n") ? "" : "\n"}`;
+}
+function stripBom(raw) {
+	return raw.replace(/^\uFEFF/, "");
+}
+function looksLikeJson(text) {
+	const t = text.trimStart();
+	return t.startsWith("[") || t.startsWith("{");
+}
+function netscapeRowCount(text) {
+	let n = 0;
+	for (const line of text.split(/\r?\n/)) if (isNetscapeRow(line)) n += 1;
+	return n;
+}
+function isNetscapeRow(line) {
+	const t = line.trim();
+	if (!t) return false;
+	const payload = t.startsWith("#HttpOnly_") ? t.slice(10) : t;
+	if (payload.startsWith("#")) return false;
+	return payload.split("	").length >= 7;
+}
+function jsonCookies(text) {
+	let parsed;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		throw new Error("Не похоже на cookies.txt. Вставьте Netscape-файл или JSON экспорта.");
+	}
+	const list = cookieArray(parsed);
+	if (!list) throw new Error("Не похоже на cookies.txt. Вставьте Netscape-файл или JSON экспорта.");
+	return list.filter(isCookieRecord);
+}
+function cookieArray(parsed) {
+	if (Array.isArray(parsed)) return parsed;
+	if (parsed && typeof parsed === "object") {
+		const rec = parsed;
+		if (Array.isArray(rec.cookies)) return rec.cookies;
+	}
+	return null;
+}
+function isCookieRecord(item) {
+	if (!item || typeof item !== "object") return false;
+	const c = item;
+	return Boolean(typeof c.name === "string" && c.name.length > 0 && typeof c.value === "string" && typeof c.domain === "string" && c.domain.length > 0);
+}
+function toNetscapeLine(c) {
+	let domain = String(c.domain ?? "");
+	const hostOnly = c.hostOnly === true;
+	if (hostOnly) domain = domain.replace(/^\./, "");
+	else if (!domain.startsWith(".") && domain.includes(".")) domain = `.${domain}`;
+	const flag = hostOnly || !domain.startsWith(".") ? "FALSE" : "TRUE";
+	const path = c.path || "/";
+	const secure = c.secure ? "TRUE" : "FALSE";
+	const exp = expiryUnix(c);
+	const name = String(c.name ?? "");
+	const value = String(c.value ?? "").replace(/[\r\n\t]/g, "");
+	return `${c.httpOnly ? "#HttpOnly_" : ""}${domain}\t${flag}\t${path}\t${secure}\t${exp}\t${name}\t${value}`;
+}
+function expiryUnix(c) {
+	if (c.session) return 0;
+	const raw = typeof c.expirationDate === "number" ? c.expirationDate : typeof c.expires === "number" ? c.expires : typeof c.expires === "string" && /^\d+(\.\d+)?$/.test(c.expires) ? Number(c.expires) : 0;
+	if (!Number.isFinite(raw) || raw <= 0) return 0;
+	return raw > 0xe8d4a51000 ? Math.round(raw / 1e3) : Math.round(raw);
+}
+var execFileAsync$1 = promisify(execFile);
+var BROWSERS = [
+	"chrome",
+	"chromium",
+	"firefox",
+	"brave"
+];
+function pythonBin$1() {
+	if (existsSync("/usr/bin/python3.11")) return "/usr/bin/python3.11";
+	if (existsSync("/usr/local/bin/python3")) return "/usr/local/bin/python3";
+	return "python3";
+}
+function ytDlpPath$1() {
+	const candidates = [
+		process.env.YT_DLP_PATH,
+		path.join(process.cwd(), "bin/yt-dlp"),
+		"/workspace/bin/yt-dlp"
+	].filter((p) => Boolean(p));
+	for (const candidate of candidates) if (existsSync(candidate)) return candidate;
+	return null;
+}
+function cookiesFilePath() {
+	const env = process.env.YTDLP_COOKIES;
+	if (env) return env;
+	return path.join(process.cwd(), "cookies.txt");
+}
+async function cookieStatus() {
+	const file = cookiesFilePath();
+	if (!existsSync(file)) return {
+		present: false,
+		count: 0
+	};
+	try {
+		const text = await readFile(file, "utf8");
+		const count = countCookieRows(text);
+		return {
+			present: count > 0 || text.trim().length > 0,
+			count
+		};
+	} catch {
+		return {
+			present: false,
+			count: 0
+		};
+	}
+}
+async function saveCookieFile(raw) {
+	const normalized = normalizeCookieFile(raw);
+	const count = countCookieRows(normalized);
+	if (count === 0) throw new Error("В файле нет cookie-записей");
+	const dest = cookiesFilePath();
+	try {
+		await writeFile(dest, normalized, {
+			encoding: "utf8",
+			mode: 384
+		});
+	} catch {}
+	return {
+		present: true,
+		count
+	};
+}
+async function clearCookieFile() {
+	const dest = cookiesFilePath();
+	if (existsSync(dest)) await unlink(dest).catch(() => {});
+	return {
+		present: false,
+		count: 0
+	};
+}
+function profileDirs(browser) {
+	const home = os.homedir();
+	switch (browser) {
+		case "chrome": return [
+			path.join(home, ".config/google-chrome"),
+			path.join(home, "Library/Application Support/Google/Chrome"),
+			path.join(home, "AppData/Local/Google/Chrome/User Data")
+		];
+		case "chromium": return [path.join(home, ".config/chromium"), path.join(home, "Library/Application Support/Chromium")];
+		case "firefox": return [
+			path.join(home, ".mozilla/firefox"),
+			path.join(home, "Library/Application Support/Firefox"),
+			path.join(home, "AppData/Roaming/Mozilla/Firefox")
+		];
+		case "brave": return [
+			path.join(home, ".config/BraveSoftware/Brave-Browser"),
+			path.join(home, "Library/Application Support/BraveSoftware/Brave-Browser"),
+			path.join(home, "AppData/Local/BraveSoftware/Brave-Browser/User Data")
+		];
+	}
+}
+function browsersWithProfile() {
+	return BROWSERS.filter((browser) => profileDirs(browser).some((dir) => existsSync(dir)));
+}
+async function exportFromBrowser() {
+	const bin = ytDlpPath$1();
+	if (!bin) throw new Error("yt-dlp не установлен — откройте «Установка».");
+	const py = pythonBin$1();
+	const available = browsersWithProfile();
+	if (available.length === 0) throw new Error("На этой машине нет профиля Chrome / Firefox / Brave. Вставьте cookies.txt в поле.");
+	const tmp = path.join(os.tmpdir(), `octava-browser-cookies-${process.pid}.txt`);
+	for (const browser of available) try {
+		await execFileAsync$1(py, [
+			bin,
+			"--js-runtimes",
+			"node",
+			"--no-warnings",
+			"--skip-download",
+			"--ignore-no-formats-error",
+			"--cookies-from-browser",
+			browser,
+			"--cookies",
+			tmp,
+			"https://www.youtube.com/"
+		], {
+			timeout: 8e3,
+			maxBuffer: 2097152
+		});
+		if (!existsSync(tmp)) continue;
+		const text = await readFile(tmp, "utf8");
+		await unlink(tmp).catch(() => {});
+		return {
+			...await saveCookieFile(text),
+			browser
+		};
+	} catch {
+		await unlink(tmp).catch(() => {});
+	}
+	throw new Error("Не удалось взять cookies из браузера на этой машине. Вставьте cookies.txt в поле.");
+}
 var execFileAsync = promisify(execFile);
 var MAX_PLAYLIST = 40;
 var JSON_TIMEOUT_MS = 45e3;
@@ -175,15 +408,16 @@ function cookiesPath() {
 async function getCaps() {
 	const ytdlp = Boolean(ytDlpPath());
 	const ffmpeg = existsSync("/usr/local/bin/ffmpeg") || existsSync("/usr/bin/ffmpeg");
-	const cookies = Boolean(cookiesPath());
+	const ck = await cookieStatus();
 	return {
 		ytdlp,
 		ffmpeg,
 		python: pythonBin(),
-		cookies
+		cookies: ck.present,
+		cookieCount: ck.count
 	};
 }
-function baseArgs() {
+function baseArgs(cookieFile) {
 	const args = [
 		"--js-runtimes",
 		"node",
@@ -191,18 +425,42 @@ function baseArgs() {
 		"--no-check-certificates",
 		"--newline"
 	];
-	const cookies = cookiesPath();
-	if (cookies) args.push("--cookies", cookies);
+	const file = cookieFile === void 0 ? cookiesPath() : cookieFile;
+	if (file) args.push("--cookies", file);
 	return args;
 }
-async function runJson(args) {
+async function withCookieFile(raw, fn) {
+	const text = raw?.trim();
+	if (!text) return fn(cookiesPath());
+	let normalized;
+	try {
+		normalized = normalizeCookieFile(text);
+	} catch {
+		throw new ExtractorError("BAD_COOKIES", "Не похоже на cookies.txt. Вставьте Netscape-файл или JSON экспорта.");
+	}
+	const dir = await mkdtemp(path.join(os.tmpdir(), "octava-ck-"));
+	const file = path.join(dir, "cookies.txt");
+	await writeFile(file, normalized, {
+		encoding: "utf8",
+		mode: 384
+	});
+	try {
+		return await fn(file);
+	} finally {
+		await rm(dir, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+async function runJson(args, cookieFile) {
 	const bin = ytDlpPath();
 	if (!bin) throw new ExtractorError("MISSING_YTDLP", "yt-dlp не установлен. Откройте раздел «Установка» и запустите скрипт.");
 	const py = pythonBin();
 	try {
 		const { stdout } = await execFileAsync(py, [
 			bin,
-			...baseArgs(),
+			...baseArgs(cookieFile),
 			...args
 		], {
 			timeout: JSON_TIMEOUT_MS,
@@ -232,8 +490,8 @@ function mapExecError(err) {
 	const blob = `${anyErr.stderr ?? ""} ${anyErr.stdout ?? ""} ${anyErr.message ?? ""}`;
 	if (/playlist does not exist/i.test(blob)) return new ExtractorError("NOT_FOUND", "Такого плейлиста нет или он закрыт.");
 	if (/video unavailable|private video|this video is not available/i.test(blob)) return new ExtractorError("UNAVAILABLE", "Ролик недоступен, удалён или скрыт.");
-	if (/sign in to confirm|not a bot/i.test(blob)) return new ExtractorError("BOTCHECK", "YouTube просит подтвердить, что вы не бот. На своей машине положите cookies.txt в корень проекта — см. раздел «Установка».");
-	if (/HTTP Error 403|403: Forbidden/i.test(blob)) return new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. С домашней сети это обычно проходит — запустите скрипт установки.");
+	if (/sign in to confirm|not a bot/i.test(blob)) return new ExtractorError("BOTCHECK", "YouTube просит подтвердить, что вы не бот. Вставьте cookies YouTube в поле на главной — после согласия.");
+	if (/HTTP Error 403|403: Forbidden/i.test(blob)) return new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube в поле на главной или запустите скрипт установки у себя.");
 	if (anyErr.killed) return new ExtractorError("TIMEOUT", "YouTube слишком долго отвечает. Попробуйте ещё раз.");
 	return new ExtractorError("EXTRACT", blob.split("\n").map((l) => l.trim()).find((l) => l.startsWith("ERROR:"))?.replace(/^ERROR:\s*/i, "") || "Не удалось разобрать ссылку.");
 }
@@ -257,7 +515,10 @@ function asTrack(entry) {
 		filesize
 	};
 }
-async function resolveInput(raw) {
+async function resolveInput(raw, cookiesText) {
+	return withCookieFile(cookiesText, (cookieFile) => resolveWith(raw, cookieFile));
+}
+async function resolveWith(raw, cookieFile) {
 	const parsed = parseYoutubeInput(raw);
 	if (parsed.kind === "empty") throw new ExtractorError("EMPTY", "Вставьте ссылку или поисковый запрос.");
 	if (parsed.kind === "search") {
@@ -267,7 +528,7 @@ async function resolveInput(raw) {
 			"--playlist-end",
 			"8",
 			toYtdlpTarget(parsed)
-		])).entries ?? []).map(asTrack).filter((t) => Boolean(t));
+		], cookieFile)).entries ?? []).map(asTrack).filter((t) => Boolean(t));
 		return {
 			kind: "search",
 			query: parsed.query,
@@ -283,9 +544,9 @@ async function resolveInput(raw) {
 			"--playlist-end",
 			String(MAX_PLAYLIST),
 			`https://www.youtube.com/playlist?list=${playlistId}`
-		]);
+		], cookieFile);
 		const tracks = (data.entries ?? []).map(asTrack).filter((t) => Boolean(t));
-		if (tracks.length === 0 && parsed.kind === "video") return resolveVideo(parsed.videoId);
+		if (tracks.length === 0 && parsed.kind === "video") return resolveVideo(parsed.videoId, cookieFile);
 		return {
 			kind: "playlist",
 			id: data.playlist_id || playlistId,
@@ -294,15 +555,15 @@ async function resolveInput(raw) {
 			tracks
 		};
 	}
-	return resolveVideo(parsed.videoId);
+	return resolveVideo(parsed.videoId, cookieFile);
 }
-async function resolveVideo(videoId) {
+async function resolveVideo(videoId, cookieFile) {
 	const track = asTrack(await runJson([
 		"-J",
 		"--no-playlist",
 		"--skip-download",
 		watchUrl(videoId)
-	]));
+	], cookieFile));
 	if (!track) throw new ExtractorError("NOT_FOUND", "Не удалось получить данные ролика.");
 	return {
 		kind: "video",
@@ -342,17 +603,17 @@ function formatArgs(format) {
 	];
 	return ["-f", "bestaudio[ext=m4a]/bestaudio/best"];
 }
-async function extractAudio(videoId, format) {
+async function extractAudio(videoId, format, cookiesText) {
 	if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
 	const bin = ytDlpPath();
 	if (!bin) throw new ExtractorError("MISSING_YTDLP", "yt-dlp не установлен. Откройте раздел «Установка».");
-	return withSlot(async () => {
+	return withCookieFile(cookiesText, (cookieFile) => withSlot(async () => {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
 		const outTpl = path.join(dir, "%(id)s.%(ext)s");
 		const py = pythonBin();
 		const args = [
 			bin,
-			...baseArgs(),
+			...baseArgs(cookieFile),
 			...formatArgs(format),
 			"--no-playlist",
 			"--no-part",
@@ -414,7 +675,7 @@ async function extractAudio(videoId, format) {
 				recursive: true,
 				force: true
 			}).catch(() => {});
-			throw new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Запустите Octava у себя через скрипт установки.");
+			throw new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube или запустите установщик у себя.");
 		}
 		const ext = path.extname(audio).slice(1) || (format === "mp3" ? "mp3" : "m4a");
 		return {
@@ -429,7 +690,7 @@ async function extractAudio(videoId, format) {
 				}).catch(() => {});
 			}
 		};
-	});
+	}));
 }
 async function streamAudioFile(file) {
 	const info = await stat(file.path);
@@ -449,11 +710,11 @@ async function streamAudioFile(file) {
 }
 function errorResponse(err) {
 	const mapped = err instanceof ExtractorError ? err : mapExecError(err);
-	const status = mapped.code === "MISSING_YTDLP" ? 503 : mapped.code === "NOT_FOUND" || mapped.code === "UNAVAILABLE" ? 404 : mapped.code === "BAD_ID" || mapped.code === "EMPTY" ? 400 : 502;
+	const status = mapped.code === "MISSING_YTDLP" ? 503 : mapped.code === "NOT_FOUND" || mapped.code === "UNAVAILABLE" ? 404 : mapped.code === "BAD_ID" || mapped.code === "EMPTY" || mapped.code === "BAD_COOKIES" ? 400 : 502;
 	return Response.json({
 		code: mapped.code,
 		message: mapped.message
 	}, { status });
 }
 //#endregion
-export { extensionFor as a, formatDuration as c, resolveInput as d, safeFilename as f, errorResponse as i, getCaps as l, FORMAT_LABEL as n, extractAudio as o, streamAudioFile as p, blobKey as r, formatBytes as s, ExtractorError as t, newId as u };
+export { resolveInput as _, cookieCountLabel as a, streamAudioFile as b, exportFromBrowser as c, formatBytes as d, formatDuration as f, normalizeCookieFile as g, newId as h, clearCookieFile as i, extensionFor as l, isLikelyCookieFile as m, FORMAT_LABEL as n, countCookieRows as o, getCaps as p, blobKey as r, errorResponse as s, ExtractorError as t, extractAudio as u, safeFilename as v, saveCookieFile as y };
