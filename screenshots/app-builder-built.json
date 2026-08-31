@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Octava",
+      "hasCanvas": false,
+      "bodyTextLen": 420,
+      "bodyTextHash": "163d1435286d98e61a6bd82a49fe5fe27756f22e6c28eb05b63e565348753fa3",
+      "bodyTextPrefix": "Octava Установка СБОРКИ Лента История МОИ Пока пусто — сложите т",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Octava",
+      "hasCanvas": false,
+      "bodyTextLen": 420,
+      "bodyTextHash": "163d1435286d98e61a6bd82a49fe5fe27756f22e6c28eb05b63e565348753fa3",
+      "bodyTextPrefix": "Octava Установка СБОРКИ Лента История МОИ Пока пусто — сложите т",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}
