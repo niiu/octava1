@@ -4,8 +4,8 @@ import { _ as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
 import { _ as Download, v as Copy, x as Check } from "../_libs/lucide-react.mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { n as Wordmark, t as Button } from "./logo-DUs96L7M.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/install-BXr26U65.js
+import { n as Wordmark, t as Button } from "./logo-CY5XAm4x.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/install-uvFUugIq.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var FALLBACK_SCRIPT = `#!/usr/bin/env bash

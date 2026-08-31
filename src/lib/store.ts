@@ -1,17 +1,19 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AudioFormat, LocalPlaylist, Track } from "./media";
-import { newId } from "./media";
+import type { AudioFormat, LocalPlaylist, Mp3Quality, Track } from "./media";
+import { DEFAULT_MP3_QUALITY, newId } from "./media";
 
 type Catalog = Record<string, Track>;
 
 type AppState = {
   format: AudioFormat;
+  mp3Quality: Mp3Quality;
   catalog: Catalog;
   historyIds: string[];
   playlists: LocalPlaylist[];
   selectedIds: string[];
   setFormat: (format: AudioFormat) => void;
+  setMp3Quality: (quality: Mp3Quality) => void;
   remember: (tracks: Track[]) => void;
   toggleSelected: (id: string) => void;
   setSelected: (ids: string[]) => void;
@@ -30,11 +32,13 @@ export const useLibrary = create<AppState>()(
   persist(
     (set, get) => ({
       format: "m4a",
+      mp3Quality: DEFAULT_MP3_QUALITY,
       catalog: {},
       historyIds: [],
       playlists: [],
       selectedIds: [],
       setFormat: (format) => set({ format }),
+      setMp3Quality: (mp3Quality) => set({ mp3Quality }),
       remember: (tracks) => {
         if (tracks.length === 0) return;
         const catalog = { ...get().catalog };
@@ -101,6 +105,7 @@ export const useLibrary = create<AppState>()(
       skipHydration: true,
       partialize: (state) => ({
         format: state.format,
+        mp3Quality: state.mp3Quality,
         catalog: state.catalog,
         historyIds: state.historyIds,
         playlists: state.playlists,

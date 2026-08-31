@@ -1,19 +1,32 @@
-import type { AudioFormat } from "./media";
-import { blobKey } from "./media";
+import type { AudioFormat, Mp3Quality } from "./media";
+import { DEFAULT_MP3_QUALITY, blobKey } from "./media";
 
 const blobs = new Map<string, Blob>();
 const urls = new Map<string, string>();
 
-export function getBlob(id: string, format: AudioFormat): Blob | undefined {
-  return blobs.get(blobKey(id, format));
+export function getBlob(
+  id: string,
+  format: AudioFormat,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
+): Blob | undefined {
+  return blobs.get(blobKey(id, format, quality));
 }
 
-export function hasBlob(id: string, format: AudioFormat): boolean {
-  return blobs.has(blobKey(id, format));
+export function hasBlob(
+  id: string,
+  format: AudioFormat,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
+): boolean {
+  return blobs.has(blobKey(id, format, quality));
 }
 
-export function setBlob(id: string, format: AudioFormat, blob: Blob): string {
-  const key = blobKey(id, format);
+export function setBlob(
+  id: string,
+  format: AudioFormat,
+  blob: Blob,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
+): string {
+  const key = blobKey(id, format, quality);
   blobs.set(key, blob);
   const prev = urls.get(key);
   if (prev) URL.revokeObjectURL(prev);
@@ -22,8 +35,12 @@ export function setBlob(id: string, format: AudioFormat, blob: Blob): string {
   return next;
 }
 
-export function getBlobUrl(id: string, format: AudioFormat): string | undefined {
-  return urls.get(blobKey(id, format));
+export function getBlobUrl(
+  id: string,
+  format: AudioFormat,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
+): string | undefined {
+  return urls.get(blobKey(id, format, quality));
 }
 
 export function clearBlobs(): void {

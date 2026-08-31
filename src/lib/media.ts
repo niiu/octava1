@@ -1,5 +1,26 @@
 export type AudioFormat = "m4a" | "mp3" | "source";
 
+export const MP3_QUALITIES = ["320", "192", "128"] as const;
+export type Mp3Quality = (typeof MP3_QUALITIES)[number];
+export const DEFAULT_MP3_QUALITY: Mp3Quality = "192";
+
+export const MP3_QUALITY_LABEL: Record<Mp3Quality, string> = {
+  "320": "320",
+  "192": "192",
+  "128": "128",
+};
+
+export function parseMp3Quality(raw: unknown): Mp3Quality {
+  if (typeof raw === "string" && (MP3_QUALITIES as readonly string[]).includes(raw)) {
+    return raw as Mp3Quality;
+  }
+  return DEFAULT_MP3_QUALITY;
+}
+
+export function mp3FfmpegQuality(quality: Mp3Quality): string {
+  return `${quality}K`;
+}
+
 export type Track = {
   id: string;
   title: string;
@@ -98,7 +119,12 @@ export function mimeFor(format: AudioFormat): string {
   return "application/octet-stream";
 }
 
-export function blobKey(id: string, format: AudioFormat): string {
+export function blobKey(
+  id: string,
+  format: AudioFormat,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
+): string {
+  if (format === "mp3") return `${id}::mp3::${quality}`;
   return `${id}::${format}`;
 }
 

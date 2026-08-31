@@ -36,9 +36,13 @@ import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
 import { ingestYtText, noteYt } from "@/lib/yt-log-client";
-import type { AudioFormat, ExtractorCaps, ResolveResult, Track } from "@/lib/media";
+import type { AudioFormat, ExtractorCaps, Mp3Quality, ResolveResult, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
+  MP3_QUALITIES,
+  MP3_QUALITY_LABEL,
+  DEFAULT_MP3_QUALITY,
+  blobKey,
   formatBytes,
   formatDuration,
   safeFilename,
@@ -83,6 +87,8 @@ export function OctavaApp() {
 
   const format = useLibrary((s) => s.format);
   const setFormat = useLibrary((s) => s.setFormat);
+  const mp3Quality = useLibrary((s) => s.mp3Quality) ?? DEFAULT_MP3_QUALITY;
+  const setMp3Quality = useLibrary((s) => s.setMp3Quality);
   const catalog = useLibrary((s) => s.catalog);
   const remember = useLibrary((s) => s.remember);
   const playlists = useLibrary((s) => s.playlists);
@@ -189,8 +195,8 @@ export function OctavaApp() {
     try {
       const blob = await fetchAudioBlob(track.id, format, (ratio) => {
         setProgress((p) => ({ ...p, [track.id]: ratio }));
-      }, cookiePayload(cookies));
-      setReady((r) => ({ ...r, [track.id]: true }));
+      }, cookiePayload(cookies), mp3Quality);
+      setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
       const ext = extensionFor(format, blob.type);
       saveBlob(blob, `${safeFilename(track.title)}.${ext}`);
       noteYt("ok", `сохранено «${track.title}»`);
@@ -220,15 +226,15 @@ export function OctavaApp() {
     for (let i = 0; i < tracks.length; i++) {
       const track = tracks[i]!;
       setZip((z) => ({ ...z, current: track.title, done: i, packing: false }));
-      if (hasBlob(track.id, format) || ready[track.id]) {
+      if (hasBlob(track.id, format, mp3Quality) || ready[blobKey(track.id, format, mp3Quality)]) {
         ok.push(track);
         continue;
       }
       try {
         await fetchAudioBlob(track.id, format, (ratio) => {
           setProgress((p) => ({ ...p, [track.id]: ratio }));
-        }, cookiePayload(cookies));
-        setReady((r) => ({ ...r, [track.id]: true }));
+        }, cookiePayload(cookies), mp3Quality);
+        setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
         ok.push(track);
       } catch (err) {
         const message = err instanceof Error ? err.message : "не скачался";
@@ -241,7 +247,7 @@ export function OctavaApp() {
     try {
       const packed = await packTracksZip(ok, format, (done, total, title) => {
         setZip((z) => ({ ...z, done, total, current: title || "Упаковка ZIP" }));
-      });
+      }, mp3Quality);
       if (packed.packed === 0) {
         toast.error("В архив не попало ни одного файла");
       } else {
@@ -430,6 +436,8 @@ export function OctavaApp() {
                 value={format}
                 ffmpeg={caps?.ffmpeg ?? false}
                 onChange={setFormat}
+                mp3Quality={mp3Quality}
+                onMp3Quality={setMp3Quality}
               />
               <Button
                 variant="secondary"
@@ -495,7 +503,10 @@ export function OctavaApp() {
                   checked={selectedIds.includes(track.id)}
                   onCheck={() => toggleSelected(track.id)}
                   progress={progress[track.id]}
-                  saved={Boolean(ready[track.id] || hasBlob(track.id, format))}
+                  saved={Boolean(
+                    ready[blobKey(track.id, format, mp3Quality)] ||
+                      hasBlob(track.id, format, mp3Quality),
+                  )}
                   isPlaying={nowPlaying?.id === track.id && playing}
                   onPlay={() => playTrack(track)}
                   onDownload={() => void downloadOne(track)}
@@ -536,8 +547,12 @@ export function OctavaApp() {
         <PlayerBar
           track={nowPlaying}
           playing={playing}
-          hasFile={Boolean(ready[nowPlaying.id] || hasBlob(nowPlaying.id, format))}
+          hasFile={Boolean(
+            ready[blobKey(nowPlaying.id, format, mp3Quality)] ||
+              hasBlob(nowPlaying.id, format, mp3Quality),
+          )}
           format={format}
+          quality={mp3Quality}
           onToggle={() => setPlaying((v) => !v)}
           onClose={() => {
             setPlaying(false);
@@ -644,27 +659,57 @@ function FormatSwitch({
   value,
   onChange,
   ffmpeg,
+  mp3Quality,
+  onMp3Quality,
 }: {
   value: AudioFormat;
   onChange: (v: AudioFormat) => void;
   ffmpeg: boolean;
+  mp3Quality: Mp3Quality;
+  onMp3Quality: (q: Mp3Quality) => void;
 }) {
   const options: AudioFormat[] = ffmpeg ? ["m4a", "mp3", "source"] : ["m4a", "source"];
   return (
-    <div className="flex rounded-md bg-raised p-1 shadow-[var(--shadow-border)]">
-      {options.map((opt) => (
-        <button
-          key={opt}
-          type="button"
-          onClick={() => onChange(opt)}
-          className={cn(
-            "h-8 rounded-sm px-2.5 text-xs font-medium",
-            value === opt ? "bg-fg text-bg" : "text-muted hover:text-fg",
-          )}
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex rounded-md bg-raised p-1 shadow-[var(--shadow-border)]">
+        {options.map((opt) => (
+          <button
+            key={opt}
+            id={`octava-format-${opt}`}
+            type="button"
+            onClick={() => onChange(opt)}
+            className={cn(
+              "h-8 rounded-sm px-2.5 text-xs font-medium",
+              value === opt ? "bg-fg text-bg" : "text-muted hover:text-fg",
+            )}
+          >
+            {FORMAT_LABEL[opt]}
+          </button>
+        ))}
+      </div>
+      {value === "mp3" && ffmpeg ? (
+        <div
+          className="flex items-center gap-1 rounded-md bg-raised p-1 shadow-[var(--shadow-border)]"
+          role="group"
+          aria-label="Качество MP3, кбит/с"
         >
-          {FORMAT_LABEL[opt]}
-        </button>
-      ))}
+          {MP3_QUALITIES.map((q) => (
+            <button
+              key={q}
+              id={`octava-mp3-q-${q}`}
+              type="button"
+              onClick={() => onMp3Quality(q)}
+              className={cn(
+                "h-8 rounded-sm px-2.5 font-mono text-xs font-medium tabular-nums",
+                mp3Quality === q ? "bg-fg text-bg" : "text-muted hover:text-fg",
+              )}
+            >
+              {MP3_QUALITY_LABEL[q]}
+            </button>
+          ))}
+          <span className="pr-2 pl-0.5 text-xs text-subtle">кбит/с</span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -781,6 +826,7 @@ function PlayerBar({
   playing,
   hasFile,
   format,
+  quality,
   onToggle,
   onClose,
 }: {
@@ -788,11 +834,12 @@ function PlayerBar({
   playing: boolean;
   hasFile: boolean;
   format: AudioFormat;
+  quality: Mp3Quality;
   onToggle: () => void;
   onClose: () => void;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const fileUrl = hasFile ? getBlobUrl(track.id, format) : undefined;
+  const fileUrl = hasFile ? getBlobUrl(track.id, format, quality) : undefined;
 
   useEffect(() => {
     const el = audioRef.current;

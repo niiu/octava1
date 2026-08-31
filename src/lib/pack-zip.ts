@@ -1,12 +1,13 @@
 import JSZip from "jszip";
 import { getBlob } from "./blobs";
-import type { AudioFormat, Track } from "./media";
-import { extensionFor, safeFilename } from "./media";
+import type { AudioFormat, Mp3Quality, Track } from "./media";
+import { DEFAULT_MP3_QUALITY, extensionFor, safeFilename } from "./media";
 
 export async function packTracksZip(
   tracks: Track[],
   format: AudioFormat,
   onProgress?: (done: number, total: number, title: string) => void,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
 ): Promise<{ blob: Blob; packed: number; skipped: string[] }> {
   const zip = new JSZip();
   const skipped: string[] = [];
@@ -15,7 +16,7 @@ export async function packTracksZip(
 
   for (const track of tracks) {
     onProgress?.(packed, total, track.title);
-    const blob = getBlob(track.id, format);
+    const blob = getBlob(track.id, format, quality);
     if (!blob) {
       skipped.push(track.title);
       continue;

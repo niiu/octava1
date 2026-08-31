@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { d as extensionFor, g as isLikelyCookieFile, m as formatDuration, n as FORMAT_LABEL, o as cookieCountLabel, p as formatBytes, r as blobKey, s as countCookieRows, v as newId, x as safeFilename, y as normalizeCookieFile } from "./extractor.server-CxZG7wTz.mjs";
+import { a as blobKey, b as newId, c as cookieCountLabel, g as formatDuration, h as formatBytes, i as MP3_QUALITY_LABEL, l as countCookieRows, n as FORMAT_LABEL, p as extensionFor, r as MP3_QUALITIES, v as isLikelyCookieFile, w as safeFilename, x as normalizeCookieFile } from "./extractor.server-DFsUbsnn.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { _ as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime, n as CheckboxIndicator, t as Checkbox$1 } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
@@ -7,14 +7,14 @@ import { a as string, i as object, n as literal, t as number } from "../_libs/zo
 import { S as Archive, _ as Download, a as Terminal, b as ChevronDown, c as Plus, d as Minus, f as LoaderCircle, g as FileUp, h as FolderPlus, i as Trash2, l as Play, m as History, n as X, o as Search, p as ListMusic, s as Save, t as Youtube, u as Pause, v as Copy, x as Check, y as Cookie } from "../_libs/lucide-react.mjs";
 import { a as DialogOverlay$1, i as DialogDescription$1, n as DialogClose, o as DialogPortal$1, r as DialogContent$1, s as DialogTitle$1, t as Dialog$1 } from "../_libs/@radix-ui/react-dialog+[...].mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { n as cn } from "./router-DAOLYlSN.mjs";
-import { n as Wordmark, t as Button } from "./logo-DUs96L7M.mjs";
+import { n as cn } from "./router-GyBrEjAi.mjs";
+import { n as Wordmark, t as Button } from "./logo-CY5XAm4x.mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { n as Root, t as Indicator } from "../_libs/radix-ui__react-progress.mjs";
 import { t as Root$1 } from "../_libs/radix-ui__react-separator.mjs";
 import { t as require_lib } from "../_libs/jszip+[...].mjs";
 import { n as create, t as persist } from "../_libs/zustand.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-DvxaEM9L.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-DV4yNOGn.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var import_lib = /* @__PURE__ */ __toESM(require_lib());
@@ -615,14 +615,14 @@ function YtConsole({ busy = false }) {
 }
 var blobs = /* @__PURE__ */ new Map();
 var urls = /* @__PURE__ */ new Map();
-function getBlob(id, format) {
-	return blobs.get(blobKey(id, format));
+function getBlob(id, format, quality = "192") {
+	return blobs.get(blobKey(id, format, quality));
 }
-function hasBlob(id, format) {
-	return blobs.has(blobKey(id, format));
+function hasBlob(id, format, quality = "192") {
+	return blobs.has(blobKey(id, format, quality));
 }
-function setBlob(id, format, blob) {
-	const key = blobKey(id, format);
+function setBlob(id, format, blob, quality = "192") {
+	const key = blobKey(id, format, quality);
 	blobs.set(key, blob);
 	const prev = urls.get(key);
 	if (prev) URL.revokeObjectURL(prev);
@@ -630,8 +630,8 @@ function setBlob(id, format, blob) {
 	urls.set(key, next);
 	return next;
 }
-function getBlobUrl(id, format) {
-	return urls.get(blobKey(id, format));
+function getBlobUrl(id, format, quality = "192") {
+	return urls.get(blobKey(id, format, quality));
 }
 var DownloadError = class extends Error {
 	code;
@@ -642,13 +642,14 @@ var DownloadError = class extends Error {
 		this.log = log;
 	}
 };
-async function fetchAudioBlob(id, format, onProgress, cookies, signal) {
+async function fetchAudioBlob(id, format, onProgress, cookies, quality = "192", signal) {
 	const res = await fetch("/api/audio", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({
 			id,
 			format,
+			quality: format === "mp3" ? quality : void 0,
 			cookies: cookies?.trim() ? cookies : void 0
 		}),
 		signal
@@ -668,7 +669,7 @@ async function fetchAudioBlob(id, format, onProgress, cookies, signal) {
 	const total = Number(res.headers.get("content-length") ?? 0);
 	if (!res.body) {
 		const blob = await res.blob();
-		setBlob(id, format, blob);
+		setBlob(id, format, blob, quality);
 		return blob;
 	}
 	const reader = res.body.getReader();
@@ -692,18 +693,18 @@ async function fetchAudioBlob(id, format, onProgress, cookies, signal) {
 		offset += chunk.byteLength;
 	}
 	const blob = new Blob([copy], { type: mime });
-	setBlob(id, format, blob);
+	setBlob(id, format, blob, quality);
 	onProgress?.(1);
 	return blob;
 }
-async function packTracksZip(tracks, format, onProgress) {
+async function packTracksZip(tracks, format, onProgress, quality = "192") {
 	const zip = new import_lib.default();
 	const skipped = [];
 	let packed = 0;
 	const total = tracks.length;
 	for (const track of tracks) {
 		onProgress?.(packed, total, track.title);
-		const blob = getBlob(track.id, format);
+		const blob = getBlob(track.id, format, quality);
 		if (!blob) {
 			skipped.push(track.title);
 			continue;
@@ -736,11 +737,13 @@ function saveBlob(blob, filename) {
 var MAX_HISTORY = 80;
 var useLibrary = create()(persist((set, get) => ({
 	format: "m4a",
+	mp3Quality: "192",
 	catalog: {},
 	historyIds: [],
 	playlists: [],
 	selectedIds: [],
 	setFormat: (format) => set({ format }),
+	setMp3Quality: (mp3Quality) => set({ mp3Quality }),
 	remember: (tracks) => {
 		if (tracks.length === 0) return;
 		const catalog = { ...get().catalog };
@@ -791,6 +794,7 @@ var useLibrary = create()(persist((set, get) => ({
 	skipHydration: true,
 	partialize: (state) => ({
 		format: state.format,
+		mp3Quality: state.mp3Quality,
 		catalog: state.catalog,
 		historyIds: state.historyIds,
 		playlists: state.playlists
@@ -820,6 +824,8 @@ function OctavaApp() {
 	const [cookieCount, setCookieCount] = (0, import_react.useState)(0);
 	const format = useLibrary((s) => s.format);
 	const setFormat = useLibrary((s) => s.setFormat);
+	const mp3Quality = useLibrary((s) => s.mp3Quality) ?? "192";
+	const setMp3Quality = useLibrary((s) => s.setMp3Quality);
 	const catalog = useLibrary((s) => s.catalog);
 	const remember = useLibrary((s) => s.remember);
 	const playlists = useLibrary((s) => s.playlists);
@@ -923,10 +929,10 @@ function OctavaApp() {
 					...p,
 					[track.id]: ratio
 				}));
-			}, cookiePayload(cookies));
+			}, cookiePayload(cookies), mp3Quality);
 			setReady((r) => ({
 				...r,
-				[track.id]: true
+				[blobKey(track.id, format, mp3Quality)]: true
 			}));
 			const ext = extensionFor(format, blob.type);
 			saveBlob(blob, `${safeFilename(track.title)}.${ext}`);
@@ -967,7 +973,7 @@ function OctavaApp() {
 				done: i,
 				packing: false
 			}));
-			if (hasBlob(track.id, format) || ready[track.id]) {
+			if (hasBlob(track.id, format, mp3Quality) || ready[blobKey(track.id, format, mp3Quality)]) {
 				ok.push(track);
 				continue;
 			}
@@ -977,10 +983,10 @@ function OctavaApp() {
 						...p,
 						[track.id]: ratio
 					}));
-				}, cookiePayload(cookies));
+				}, cookiePayload(cookies), mp3Quality);
 				setReady((r) => ({
 					...r,
-					[track.id]: true
+					[blobKey(track.id, format, mp3Quality)]: true
 				}));
 				ok.push(track);
 			} catch (err) {
@@ -1004,7 +1010,7 @@ function OctavaApp() {
 					total,
 					current: title || "Упаковка ZIP"
 				}));
-			});
+			}, mp3Quality);
 			if (packed.packed === 0) toast.error("В архив не попало ни одного файла");
 			else {
 				const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
@@ -1192,7 +1198,9 @@ function OctavaApp() {
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)(FormatSwitch, {
 										value: format,
 										ffmpeg: caps?.ffmpeg ?? false,
-										onChange: setFormat
+										onChange: setFormat,
+										mp3Quality,
+										onMp3Quality: setMp3Quality
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
 										variant: "secondary",
@@ -1245,7 +1253,7 @@ function OctavaApp() {
 									checked: selectedIds.includes(track.id),
 									onCheck: () => toggleSelected(track.id),
 									progress: progress[track.id],
-									saved: Boolean(ready[track.id] || hasBlob(track.id, format)),
+									saved: Boolean(ready[blobKey(track.id, format, mp3Quality)] || hasBlob(track.id, format, mp3Quality)),
 									isPlaying: nowPlaying?.id === track.id && playing,
 									onPlay: () => playTrack(track),
 									onDownload: () => void downloadOne(track),
@@ -1278,8 +1286,9 @@ function OctavaApp() {
 			nowPlaying ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PlayerBar, {
 				track: nowPlaying,
 				playing,
-				hasFile: Boolean(ready[nowPlaying.id] || hasBlob(nowPlaying.id, format)),
+				hasFile: Boolean(ready[blobKey(nowPlaying.id, format, mp3Quality)] || hasBlob(nowPlaying.id, format, mp3Quality)),
 				format,
+				quality: mp3Quality,
 				onToggle: () => setPlaying((v) => !v),
 				onClose: () => {
 					setPlaying(false);
@@ -1366,19 +1375,37 @@ function RailButton({ active, onClick, icon, label, hint, className }) {
 		]
 	});
 }
-function FormatSwitch({ value, onChange, ffmpeg }) {
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-		className: "flex rounded-md bg-raised p-1 shadow-[var(--shadow-border)]",
-		children: (ffmpeg ? [
-			"m4a",
-			"mp3",
-			"source"
-		] : ["m4a", "source"]).map((opt) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-			type: "button",
-			onClick: () => onChange(opt),
-			className: cn("h-8 rounded-sm px-2.5 text-xs font-medium", value === opt ? "bg-fg text-bg" : "text-muted hover:text-fg"),
-			children: FORMAT_LABEL[opt]
-		}, opt))
+function FormatSwitch({ value, onChange, ffmpeg, mp3Quality, onMp3Quality }) {
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "flex flex-wrap items-center gap-2",
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+			className: "flex rounded-md bg-raised p-1 shadow-[var(--shadow-border)]",
+			children: (ffmpeg ? [
+				"m4a",
+				"mp3",
+				"source"
+			] : ["m4a", "source"]).map((opt) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				id: `octava-format-${opt}`,
+				type: "button",
+				onClick: () => onChange(opt),
+				className: cn("h-8 rounded-sm px-2.5 text-xs font-medium", value === opt ? "bg-fg text-bg" : "text-muted hover:text-fg"),
+				children: FORMAT_LABEL[opt]
+			}, opt))
+		}), value === "mp3" && ffmpeg ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+			className: "flex items-center gap-1 rounded-md bg-raised p-1 shadow-[var(--shadow-border)]",
+			role: "group",
+			"aria-label": "Качество MP3, кбит/с",
+			children: [MP3_QUALITIES.map((q) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				id: `octava-mp3-q-${q}`,
+				type: "button",
+				onClick: () => onMp3Quality(q),
+				className: cn("h-8 rounded-sm px-2.5 font-mono text-xs font-medium tabular-nums", mp3Quality === q ? "bg-fg text-bg" : "text-muted hover:text-fg"),
+				children: MP3_QUALITY_LABEL[q]
+			}, q)), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+				className: "pr-2 pl-0.5 text-xs text-subtle",
+				children: "кбит/с"
+			})]
+		}) : null]
 	});
 }
 function EmptyState() {
@@ -1492,9 +1519,9 @@ function TrackRow({ track, checked, onCheck, progress, saved, isPlaying, onPlay,
 		]
 	});
 }
-function PlayerBar({ track, playing, hasFile, format, onToggle, onClose }) {
+function PlayerBar({ track, playing, hasFile, format, quality, onToggle, onClose }) {
 	const audioRef = (0, import_react.useRef)(null);
-	const fileUrl = hasFile ? getBlobUrl(track.id, format) : void 0;
+	const fileUrl = hasFile ? getBlobUrl(track.id, format, quality) : void 0;
 	(0, import_react.useEffect)(() => {
 		const el = audioRef.current;
 		if (!el) return;

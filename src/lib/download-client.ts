@@ -1,5 +1,6 @@
 import { setBlob } from "./blobs";
-import type { AudioFormat } from "./media";
+import type { AudioFormat, Mp3Quality } from "./media";
+import { DEFAULT_MP3_QUALITY } from "./media";
 
 export class DownloadError extends Error {
   code: string;
@@ -16,6 +17,7 @@ export async function fetchAudioBlob(
   format: AudioFormat,
   onProgress?: (ratio: number) => void,
   cookies?: string,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
   signal?: AbortSignal,
 ): Promise<Blob> {
   const res = await fetch("/api/audio", {
@@ -24,6 +26,7 @@ export async function fetchAudioBlob(
     body: JSON.stringify({
       id,
       format,
+      quality: format === "mp3" ? quality : undefined,
       cookies: cookies?.trim() ? cookies : undefined,
     }),
     signal,
@@ -50,7 +53,7 @@ export async function fetchAudioBlob(
   const total = Number(res.headers.get("content-length") ?? 0);
   if (!res.body) {
     const blob = await res.blob();
-    setBlob(id, format, blob);
+    setBlob(id, format, blob, quality);
     return blob;
   }
 
@@ -75,7 +78,7 @@ export async function fetchAudioBlob(
     offset += chunk.byteLength;
   }
   const blob = new Blob([copy], { type: mime });
-  setBlob(id, format, blob);
+  setBlob(id, format, blob, quality);
   onProgress?.(1);
   return blob;
 }

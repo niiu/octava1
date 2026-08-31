@@ -5,8 +5,16 @@ import { mkdtemp, readdir, rm, stat, unlink, writeFile } from "node:fs/promises"
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import type { AudioFormat, ExtractorCaps, ResolveResult, Track } from "./media";
-import { contentDisposition, mimeFor, safeFilename, thumbFor, watchUrl } from "./media";
+import type { AudioFormat, ExtractorCaps, Mp3Quality, ResolveResult, Track } from "./media";
+import {
+  contentDisposition,
+  DEFAULT_MP3_QUALITY,
+  mimeFor,
+  mp3FfmpegQuality,
+  safeFilename,
+  thumbFor,
+  watchUrl,
+} from "./media";
 import { parseYoutubeInput, toYtdlpTarget } from "./youtube-url";
 import { normalizeCookieFile } from "./cookie-file";
 import { cookieStatus } from "./cookie-store.server";
@@ -388,9 +396,17 @@ export type AudioFile = {
   cleanup: () => Promise<void>;
 };
 
-function formatArgs(format: AudioFormat): string[] {
+function formatArgs(format: AudioFormat, quality: Mp3Quality): string[] {
   if (format === "mp3") {
-    return ["-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "0"];
+    return [
+      "-f",
+      "bestaudio/best",
+      "-x",
+      "--audio-format",
+      "mp3",
+      "--audio-quality",
+      mp3FfmpegQuality(quality),
+    ];
   }
   if (format === "m4a") {
     return ["-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--audio-quality", "0"];
@@ -402,6 +418,7 @@ export async function extractAudio(
   videoId: string,
   format: AudioFormat,
   cookiesText?: string,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
 ): Promise<AudioFile> {
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
     throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
@@ -418,9 +435,14 @@ export async function extractAudio(
     withSlot(async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
     const outTpl = path.join(dir, "%(id)s.%(ext)s");
-    appendLog("info", `скачивание ${videoId} · ${format}`);
+    appendLog(
+      "info",
+      format === "mp3"
+        ? `скачивание ${videoId} · mp3 ${quality}k`
+        : `скачивание ${videoId} · ${format}`,
+    );
     const args = [
-      ...formatArgs(format),
+      ...formatArgs(format, quality),
       "--no-playlist",
       "--no-part",
       "--no-mtime",

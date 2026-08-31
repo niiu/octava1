@@ -5,7 +5,24 @@ import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
-//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-CxZG7wTz.js
+//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-DFsUbsnn.js
+var MP3_QUALITIES = [
+	"320",
+	"192",
+	"128"
+];
+var MP3_QUALITY_LABEL = {
+	"320": "320",
+	"192": "192",
+	"128": "128"
+};
+function parseMp3Quality(raw) {
+	if (typeof raw === "string" && MP3_QUALITIES.includes(raw)) return raw;
+	return "192";
+}
+function mp3FfmpegQuality(quality) {
+	return `${quality}K`;
+}
 var FORMAT_LABEL = {
 	m4a: "M4A",
 	mp3: "MP3",
@@ -48,7 +65,8 @@ function mimeFor(format) {
 	if (format === "m4a") return "audio/mp4";
 	return "application/octet-stream";
 }
-function blobKey(id, format) {
+function blobKey(id, format, quality = "192") {
+	if (format === "mp3") return `${id}::mp3::${quality}`;
 	return `${id}::${format}`;
 }
 function newId(prefix) {
@@ -695,7 +713,7 @@ async function withSlot(fn) {
 		waiters.shift()?.();
 	}
 }
-function formatArgs(format) {
+function formatArgs(format, quality) {
 	if (format === "mp3") return [
 		"-f",
 		"bestaudio/best",
@@ -703,7 +721,7 @@ function formatArgs(format) {
 		"--audio-format",
 		"mp3",
 		"--audio-quality",
-		"0"
+		mp3FfmpegQuality(quality)
 	];
 	if (format === "m4a") return [
 		"-f",
@@ -716,15 +734,15 @@ function formatArgs(format) {
 	];
 	return ["-f", "bestaudio[ext=m4a]/bestaudio/best"];
 }
-async function extractAudio(videoId, format, cookiesText) {
+async function extractAudio(videoId, format, cookiesText, quality = "192") {
 	if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
 	if (!ytDlpPath()) throw new ExtractorError("MISSING_YTDLP", "yt-dlp не установлен. Откройте раздел «Установка».");
 	return withCookieFile(cookiesText, (cookieFile) => withSlot(async () => {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
 		const outTpl = path.join(dir, "%(id)s.%(ext)s");
-		appendLog("info", `скачивание ${videoId} · ${format}`);
+		appendLog("info", format === "mp3" ? `скачивание ${videoId} · mp3 ${quality}k` : `скачивание ${videoId} · ${format}`);
 		const args = [
-			...formatArgs(format),
+			...formatArgs(format, quality),
 			"--no-playlist",
 			"--no-part",
 			"--no-mtime",
@@ -812,4 +830,4 @@ function errorResponse(err) {
 	}, { status });
 }
 //#endregion
-export { streamAudioFile as C, saveCookieFile as S, listLog as _, clearLog as a, resolveInput as b, dumpLogText as c, extensionFor as d, extractAudio as f, isLikelyCookieFile as g, getCaps as h, clearCookieFile as i, errorResponse as l, formatDuration as m, FORMAT_LABEL as n, cookieCountLabel as o, formatBytes as p, blobKey as r, countCookieRows as s, ExtractorError as t, exportFromBrowser as u, newId as v, safeFilename as x, normalizeCookieFile as y };
+export { resolveInput as C, streamAudioFile as E, parseMp3Quality as S, saveCookieFile as T, getCaps as _, blobKey as a, newId as b, cookieCountLabel as c, errorResponse as d, exportFromBrowser as f, formatDuration as g, formatBytes as h, MP3_QUALITY_LABEL as i, countCookieRows as l, extractAudio as m, FORMAT_LABEL as n, clearCookieFile as o, extensionFor as p, MP3_QUALITIES as r, clearLog as s, ExtractorError as t, dumpLogText as u, isLikelyCookieFile as v, safeFilename as w, normalizeCookieFile as x, listLog as y };
