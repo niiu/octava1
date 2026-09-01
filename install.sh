@@ -126,10 +126,12 @@ say "Служба в фоне"
 "$ROOT/bin/octava" enable || "$ROOT/bin/octava" start
 
 echo
-echo "Управление:"
-echo "  octava start | stop | restart | status | logs"
-echo "  systemctl --user enable --now octava"
-echo "  systemctl --user stop octava"
+echo "Управление (systemd, без алиаса octava):"
+echo "  systemctl --user status octava"
+echo "  systemctl --user restart octava"
+echo "  journalctl --user -u octava -n 80 --no-pager"
+echo "  journalctl --user -u octava -f"
+echo "Файл лога: $ROOT/.run/octava.log"
 echo
 echo "Cookies YouTube: поле на главной (экспорт с согласия) или cookies.txt в $ROOT"
 "$ROOT/bin/octava" status || true

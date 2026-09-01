@@ -48,7 +48,7 @@ write_unit() {
   local node_bin npm_dir
   node_bin="$(command -v node)"
   npm_dir="$(cd "$(dirname "$node_bin")" && pwd)"
-  mkdir -p "$(dirname "$UNIT_FILE")"
+  mkdir -p "$(dirname "$UNIT_FILE")" "$RUN_DIR"
   cat > "$UNIT_FILE" <<EOF
 [Unit]
 Description=Octava — загрузчик аудио YouTube
@@ -63,12 +63,17 @@ Environment=YT_DLP_PATH=$ROOT/bin/yt-dlp
 Environment=OCTAVA_HOME=$ROOT
 Environment=OCTAVA_HOST=0.0.0.0
 Environment=OCTAVA_PORT=8080
+Environment=NODE_ENV=production
+ExecStartPre=/bin/mkdir -p $RUN_DIR
 ExecStart=$SERVE
 Restart=on-failure
 RestartSec=4
 TimeoutStopSec=20
 KillSignal=SIGTERM
 KillMode=mixed
+StandardOutput=append:$LOG_FILE
+StandardError=append:$LOG_FILE
+SyslogIdentifier=octava
 
 [Install]
 WantedBy=default.target
@@ -195,10 +200,14 @@ cmd_status() {
 
 cmd_logs() {
   if use_systemd && [ -f "$UNIT_FILE" ]; then
+    echo "journal: journalctl --user -u $UNIT_NAME"
+    echo "файл:    $LOG_FILE"
+    echo
     exec journalctl --user -u "$UNIT_NAME" -n 80 --no-pager -f
   fi
   mkdir -p "$RUN_DIR"
   touch "$LOG_FILE"
+  echo "файл: $LOG_FILE"
   exec tail -n 80 -f "$LOG_FILE"
 }
 
@@ -215,11 +224,12 @@ Octava — служба загрузчика YouTube
   octava disable    выключить автозапуск и остановить
   octava setup      только unit и команда в ~/.local/bin
 
-Ubuntu:
-  systemctl --user start octava
-  systemctl --user stop octava
-  systemctl --user enable --now octava
+Без алиаса octava:
+  systemctl --user status octava
+  systemctl --user restart octava
+  journalctl --user -u octava -n 80 --no-pager
   journalctl --user -u octava -f
+  tail -n 80 $ROOT/.run/octava.log
 
 После установки слушает порт 8080. OCTAVA_PORT / OCTAVA_HOST можно задать в unit.
 EOF
