@@ -150,7 +150,18 @@ function slimNetscape(raw: string): string {
     const row = `${parts[0]}\t${parts[1]}\t${parts[2]}\t${parts[3]}\t${parts[4]}\t${name}\t${value}`;
     kept.push(httpOnly ? `#HttpOnly_${row}` : row);
   }
-  if (kept.length === 1) {
+  const keptNames = new Set(
+    kept.slice(1).map((line) => {
+      const payload = line.startsWith("#HttpOnly_") ? line.slice("#HttpOnly_".length) : line;
+      return payload.split("\t")[5] ?? "";
+    }),
+  );
+  if (
+    !keptNames.has("SID") &&
+    !keptNames.has("LOGIN_INFO") &&
+    !keptNames.has("__Secure-1PSID") &&
+    !keptNames.has("__Secure-3PSID")
+  ) {
     throw new Error(
       "В файле нет cookies входа на YouTube (SID / LOGIN_INFO). Экспортируйте cookies.txt, будучи авторизованы.",
     );

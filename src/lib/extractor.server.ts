@@ -99,7 +99,7 @@ function baseArgs(cookieFile?: string | null): string[] {
     "--no-check-certificates",
     "--newline",
     "--extractor-args",
-    "youtube:player_client=web_embedded,web_safari,-tv_downgraded,-tv",
+    "youtube:player_client=default,-tv_downgraded",
   ];
   const file = cookieFile === undefined ? cookiesPath() : cookieFile;
   if (file) args.push("--cookies", file);
@@ -445,7 +445,14 @@ function formatAttempts(format: AudioFormat, quality: Mp3Quality): string[][] {
   }
   if (format === "m4a") {
     return [
-      ["-f", "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b"],
+      [
+        "-f",
+        "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best",
+        "-x",
+        "--audio-format",
+        "m4a",
+      ],
+      ["-f", "ba[ext=m4a]/ba/b"],
       ["-f", "ba/b"],
     ];
   }
