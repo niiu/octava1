@@ -5,7 +5,7 @@ import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
-//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-CqGYxN9G.js
+//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-DpbQsftP.js
 var MP3_QUALITIES = [
 	"320",
 	"192",
@@ -459,15 +459,17 @@ var lastProgressBucket = -1;
 var DOWNLOAD_PCT = /\[download\]\s+(\d+(?:\.\d+)?)%/;
 var RELOAD_LINE = /please reload|reload this page|reload the page|needs to be reloaded|page needs to be reload/i;
 var BOT_LINE = /sign in to confirm|not a bot/i;
+var NO_FORMAT_LINE = /requested format is not available/i;
 function sanitizeLog(raw) {
 	return humanizeYtLog(raw.replace(/\u001b\[[0-9;]*m/g, "").replace(/\b(SID|HSID|SSID|APISID|SAPISID|__Secure-[A-Za-z0-9_-]+|LOGIN_INFO|VISITOR_INFO1_LIVE|YSC|PREF|CONSENT|SESSION_TOKEN)=[^\s;]*/gi, "$1=***").replace(/#HttpOnly_[^\n]*/g, "#HttpOnly_***").replace(/Cookie:\s*[^\n]+/gi, "Cookie: ***").replace(/--cookies(?:-from-browser)?\s+\S+/gi, "--cookies ***"));
 }
 function humanizeYtLog(raw) {
 	return raw.split(/\r?\n/).map((line) => {
 		const yt = line.match(/^(ERROR:\s*\[youtube\]\s*\S+:\s*)([\s\S]*)$/i);
-		if (yt && (BOT_LINE.test(line) || RELOAD_LINE.test(line))) {
+		if (yt && (BOT_LINE.test(line) || RELOAD_LINE.test(line) || NO_FORMAT_LINE.test(line))) {
 			const prefix = yt[1] ?? "";
 			if (BOT_LINE.test(line)) return `${prefix}YouTube просит cookies входа (проверка на бота)`;
+			if (NO_FORMAT_LINE.test(line)) return `${prefix}нет подходящего аудиоформата — пробуем другой`;
 			return `${prefix}сессия cookies сброшена — загрузите свежий cookies.txt`;
 		}
 		if (BOT_LINE.test(line)) return "YouTube просит cookies входа (проверка на бота)";
@@ -588,7 +590,7 @@ function baseArgs(cookieFile) {
 		"--no-check-certificates",
 		"--newline",
 		"--extractor-args",
-		"youtube:player_client=web_safari,web,web_embedded,-tv_downgraded"
+		"youtube:player_client=web_embedded,web_safari,-tv_downgraded,-tv"
 	];
 	const file = cookieFile === void 0 ? cookiesPath() : cookieFile;
 	if (file) args.push("--cookies", file);
@@ -713,6 +715,7 @@ function mapExecError(err) {
 	else if (/video unavailable|private video|this video is not available/i.test(blob)) mapped = new ExtractorError("UNAVAILABLE", "Ролик недоступен, удалён или скрыт.", stderr);
 	else if (/sign in to confirm|not a bot/i.test(blob)) mapped = new ExtractorError("BOTCHECK", "YouTube просит подтвердить, что вы не бот. Вставьте cookies YouTube в поле на главной — после согласия.", stderr);
 	else if (/please reload|reload this page|reload the page|needs to be reloaded|page needs to be reload/i.test(blob)) mapped = new ExtractorError("SESSION", "YouTube сбросил сессию cookies. Экспортируйте свежий cookies.txt на youtube.com и загрузите его снова.", stderr);
+	else if (/requested format is not available/i.test(blob)) mapped = new ExtractorError("NO_FORMAT", "Для этого ролика нет подходящей аудиодорожки. Попробуйте формат «как есть» или обновите cookies.", stderr);
 	else if (/ffmpeg exited with code -?11|signal 11|SIGSEGV/i.test(blob)) mapped = new ExtractorError("FFMPEG", "ffmpeg не смог перекодировать этот файл. Попробуйте формат M4A или «как есть».", stderr);
 	else if (/HTTP Error 403|403: Forbidden/i.test(blob)) mapped = new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube в поле на главной или запустите скрипт установки у себя.", stderr);
 	else if (anyErr.killed) mapped = new ExtractorError("TIMEOUT", "YouTube слишком долго отвечает. Попробуйте ещё раз.", stderr);
@@ -816,8 +819,8 @@ async function withSlot(fn) {
 		waiters.shift()?.();
 	}
 }
-function formatArgs(format, quality) {
-	if (format === "mp3") return [
+function formatAttempts(format, quality) {
+	if (format === "mp3") return [[
 		"-f",
 		"bestaudio/best",
 		"-x",
@@ -825,15 +828,20 @@ function formatArgs(format, quality) {
 		"mp3",
 		"--audio-quality",
 		mp3FfmpegQuality(quality)
-	];
-	if (format === "m4a") return [
+	], [
 		"-f",
-		"bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best",
+		"ba/b",
 		"-x",
 		"--audio-format",
-		"m4a"
-	];
-	return ["-f", "bestaudio[ext=m4a]/bestaudio/best"];
+		"mp3",
+		"--audio-quality",
+		mp3FfmpegQuality(quality)
+	]];
+	if (format === "m4a") return [["-f", "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b"], ["-f", "ba/b"]];
+	return [["-f", "ba[ext=m4a]/ba/b"], ["-f", "ba/b"]];
+}
+function isRetryableFormatError(stderr) {
+	return /requested format is not available/i.test(stderr);
 }
 async function extractAudio(videoId, format, cookiesText, quality = "192") {
 	if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
@@ -842,33 +850,54 @@ async function extractAudio(videoId, format, cookiesText, quality = "192") {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
 		const outTpl = path.join(dir, "%(id)s.%(ext)s");
 		appendLog("info", format === "mp3" ? `скачивание ${videoId} · mp3 ${quality}k` : `скачивание ${videoId} · ${format}`);
-		const args = [
-			...formatArgs(format, quality),
-			"--no-playlist",
-			"--no-part",
-			"--no-mtime",
-			"-o",
-			outTpl,
-			"--",
-			watchUrl(videoId)
-		];
-		try {
-			const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false);
-			if (proc.killed) throw Object.assign(/* @__PURE__ */ new Error("yt-dlp timeout"), {
-				killed: true,
-				stderr: proc.stderr
-			});
-			if (proc.code !== 0) throw Object.assign(/* @__PURE__ */ new Error("yt-dlp failed"), {
-				code: proc.code,
-				stderr: proc.stderr
-			});
-		} catch (err) {
+		const attempts = formatAttempts(format, quality);
+		let lastFail = null;
+		for (let i = 0; i < attempts.length; i++) {
+			const args = [
+				...attempts[i],
+				"--no-playlist",
+				"--no-part",
+				"--no-mtime",
+				"-o",
+				outTpl,
+				"--",
+				watchUrl(videoId)
+			];
+			try {
+				const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false);
+				if (proc.killed) {
+					lastFail = proc;
+					break;
+				}
+				if (proc.code === 0) {
+					lastFail = null;
+					break;
+				}
+				lastFail = proc;
+				if (i < attempts.length - 1 && isRetryableFormatError(proc.stderr)) {
+					appendLog("warn", "формат недоступен, другой вариант");
+					continue;
+				}
+				break;
+			} catch (err) {
+				await rm(dir, {
+					recursive: true,
+					force: true
+				}).catch(() => {});
+				if (err instanceof ExtractorError) throw err;
+				throw mapExecError(err);
+			}
+		}
+		if (lastFail) {
 			await rm(dir, {
 				recursive: true,
 				force: true
 			}).catch(() => {});
-			if (err instanceof ExtractorError) throw err;
-			throw mapExecError(err);
+			throw mapExecError(Object.assign(/* @__PURE__ */ new Error("yt-dlp failed"), {
+				killed: lastFail.killed,
+				code: lastFail.code,
+				stderr: lastFail.stderr
+			}));
 		}
 		const audio = (await readdir(dir)).filter((f) => !f.endsWith(".part"))[0];
 		if (!audio) {

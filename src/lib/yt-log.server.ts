@@ -13,6 +13,7 @@ const DOWNLOAD_PCT = /\[download\]\s+(\d+(?:\.\d+)?)%/;
 const RELOAD_LINE =
   /please reload|reload this page|reload the page|needs to be reloaded|page needs to be reload/i;
 const BOT_LINE = /sign in to confirm|not a bot/i;
+const NO_FORMAT_LINE = /requested format is not available/i;
 
 export function sanitizeLog(raw: string): string {
   return humanizeYtLog(
@@ -33,10 +34,13 @@ function humanizeYtLog(raw: string): string {
     .split(/\r?\n/)
     .map((line) => {
       const yt = line.match(/^(ERROR:\s*\[youtube\]\s*\S+:\s*)([\s\S]*)$/i);
-      if (yt && (BOT_LINE.test(line) || RELOAD_LINE.test(line))) {
+      if (yt && (BOT_LINE.test(line) || RELOAD_LINE.test(line) || NO_FORMAT_LINE.test(line))) {
         const prefix = yt[1] ?? "";
         if (BOT_LINE.test(line)) {
           return `${prefix}YouTube просит cookies входа (проверка на бота)`;
+        }
+        if (NO_FORMAT_LINE.test(line)) {
+          return `${prefix}нет подходящего аудиоформата — пробуем другой`;
         }
         return `${prefix}сессия cookies сброшена — загрузите свежий cookies.txt`;
       }

@@ -99,7 +99,7 @@ function baseArgs(cookieFile?: string | null): string[] {
     "--no-check-certificates",
     "--newline",
     "--extractor-args",
-    "youtube:player_client=web_safari,web,web_embedded,-tv_downgraded",
+    "youtube:player_client=web_embedded,web_safari,-tv_downgraded,-tv",
   ];
   const file = cookieFile === undefined ? cookiesPath() : cookieFile;
   if (file) args.push("--cookies", file);
@@ -253,6 +253,12 @@ function mapExecError(err: unknown): ExtractorError {
     mapped = new ExtractorError(
       "SESSION",
       "YouTube сбросил сессию cookies. Экспортируйте свежий cookies.txt на youtube.com и загрузите его снова.",
+      stderr,
+    );
+  } else if (/requested format is not available/i.test(blob)) {
+    mapped = new ExtractorError(
+      "NO_FORMAT",
+      "Для этого ролика нет подходящей аудиодорожки. Попробуйте формат «как есть» или обновите cookies.",
       stderr,
     );
   } else if (/ffmpeg exited with code -?11|signal 11|SIGSEGV/i.test(blob)) {
@@ -414,28 +420,43 @@ export type AudioFile = {
   cleanup: () => Promise<void>;
 };
 
-function formatArgs(format: AudioFormat, quality: Mp3Quality): string[] {
+function formatAttempts(format: AudioFormat, quality: Mp3Quality): string[][] {
   if (format === "mp3") {
     return [
-      "-f",
-      "bestaudio/best",
-      "-x",
-      "--audio-format",
-      "mp3",
-      "--audio-quality",
-      mp3FfmpegQuality(quality),
+      [
+        "-f",
+        "bestaudio/best",
+        "-x",
+        "--audio-format",
+        "mp3",
+        "--audio-quality",
+        mp3FfmpegQuality(quality),
+      ],
+      [
+        "-f",
+        "ba/b",
+        "-x",
+        "--audio-format",
+        "mp3",
+        "--audio-quality",
+        mp3FfmpegQuality(quality),
+      ],
     ];
   }
   if (format === "m4a") {
     return [
-      "-f",
-      "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best",
-      "-x",
-      "--audio-format",
-      "m4a",
+      ["-f", "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b"],
+      ["-f", "ba/b"],
     ];
   }
-  return ["-f", "bestaudio[ext=m4a]/bestaudio/best"];
+  return [
+    ["-f", "ba[ext=m4a]/ba/b"],
+    ["-f", "ba/b"],
+  ];
+}
+
+function isRetryableFormatError(stderr: string): boolean {
+  return /requested format is not available/i.test(stderr);
 }
 
 export async function extractAudio(
@@ -465,35 +486,51 @@ export async function extractAudio(
         ? `скачивание ${videoId} · mp3 ${quality}k`
         : `скачивание ${videoId} · ${format}`,
     );
-    const args = [
-      ...formatArgs(format, quality),
-      "--no-playlist",
-      "--no-part",
-      "--no-mtime",
-      "-o",
-      outTpl,
-      "--",
-      watchUrl(videoId),
-    ];
-
-    try {
-      const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false);
-      if (proc.killed) {
-        throw Object.assign(new Error("yt-dlp timeout"), {
-          killed: true,
-          stderr: proc.stderr,
-        });
+    const attempts = formatAttempts(format, quality);
+    let lastFail: { code: number | null; stderr: string; killed: boolean } | null =
+      null;
+    for (let i = 0; i < attempts.length; i++) {
+      const args = [
+        ...attempts[i]!,
+        "--no-playlist",
+        "--no-part",
+        "--no-mtime",
+        "-o",
+        outTpl,
+        "--",
+        watchUrl(videoId),
+      ];
+      try {
+        const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false);
+        if (proc.killed) {
+          lastFail = proc;
+          break;
+        }
+        if (proc.code === 0) {
+          lastFail = null;
+          break;
+        }
+        lastFail = proc;
+        if (i < attempts.length - 1 && isRetryableFormatError(proc.stderr)) {
+          appendLog("warn", "формат недоступен, другой вариант");
+          continue;
+        }
+        break;
+      } catch (err) {
+        await rm(dir, { recursive: true, force: true }).catch(() => {});
+        if (err instanceof ExtractorError) throw err;
+        throw mapExecError(err);
       }
-      if (proc.code !== 0) {
-        throw Object.assign(new Error("yt-dlp failed"), {
-          code: proc.code,
-          stderr: proc.stderr,
-        });
-      }
-    } catch (err) {
+    }
+    if (lastFail) {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
-      if (err instanceof ExtractorError) throw err;
-      throw mapExecError(err);
+      throw mapExecError(
+        Object.assign(new Error("yt-dlp failed"), {
+          killed: lastFail.killed,
+          code: lastFail.code,
+          stderr: lastFail.stderr,
+        }),
+      );
     }
 
     const files = (await readdir(dir)).filter((f) => !f.endsWith(".part"));

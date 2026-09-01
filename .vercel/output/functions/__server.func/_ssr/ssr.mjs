@@ -111,31 +111,31 @@ async function getStartManifest(matchedRoutes) {
 var manifest = {
 	"471041d278f466bbbcd911e755bffb17b696a719a103b0c38afabd3b26143b21": {
 		functionName: "getExtractorLog_createServerFn_handler",
-		importer: () => import("./media.functions-2A1ECRce.mjs")
+		importer: () => import("./media.functions-CidkKnnr.mjs")
 	},
 	"6e5565706d3911bd6e2e3cfd69c38da374a83ee36be0a91b2ad7e105e7eb0184": {
 		functionName: "saveYoutubeCookies_createServerFn_handler",
-		importer: () => import("./media.functions-2A1ECRce.mjs")
+		importer: () => import("./media.functions-CidkKnnr.mjs")
 	},
 	"76b99b627836fa9ae6745eafd568542168a86d786d5abd33801d69699fa5d02a": {
 		functionName: "getExtractorCaps_createServerFn_handler",
-		importer: () => import("./media.functions-2A1ECRce.mjs")
+		importer: () => import("./media.functions-CidkKnnr.mjs")
 	},
 	"7e356af630bd8842a70e21ae4d5acf69fbaf908febfd6b21f4ee151cf81033db": {
 		functionName: "resolveMedia_createServerFn_handler",
-		importer: () => import("./media.functions-2A1ECRce.mjs")
+		importer: () => import("./media.functions-CidkKnnr.mjs")
 	},
 	"95c635c2c518a34193e9ccc5e28496400ad795c19aa2397ebeb4435a5d2ee5fd": {
 		functionName: "exportYoutubeCookies_createServerFn_handler",
-		importer: () => import("./media.functions-2A1ECRce.mjs")
+		importer: () => import("./media.functions-CidkKnnr.mjs")
 	},
 	"a21b784f4fc6be40740d08075b5e8b5b817d30c590e837e4cd420ee39db4587f": {
 		functionName: "clearYoutubeCookies_createServerFn_handler",
-		importer: () => import("./media.functions-2A1ECRce.mjs")
+		importer: () => import("./media.functions-CidkKnnr.mjs")
 	},
 	"fa1365f86a87bf5ba813312150f394883694e110e7e93bd7ed294ffe3257599f": {
 		functionName: "clearExtractorLog_createServerFn_handler",
-		importer: () => import("./media.functions-2A1ECRce.mjs")
+		importer: () => import("./media.functions-CidkKnnr.mjs")
 	}
 };
 async function getServerFnById(id, access) {
@@ -1405,7 +1405,7 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-hI0P5XGt.mjs").then((n) => n.t),
+		import("./router-C1f3XRYG.mjs").then((n) => n.t),
 		import("./start-5Z2QO8AU.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);
