@@ -31,7 +31,7 @@ import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
 import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, fetchAudioBlob } from "@/lib/download-client";
-import { cancelJob, fetchJobFile, listJobs } from "@/lib/jobs-client";
+import { cancelJob, jobDownloadUrl, listJobs, startBrowserDownload } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
@@ -145,6 +145,24 @@ export function OctavaApp() {
     (j) => j.status === "queued" || j.status === "running",
   );
   const jobsBusy = runningJobs.length > 0;
+
+  function doneJobFor(track: Track): DownloadJob | undefined {
+    return serverJobs.find(
+      (j) =>
+        j.videoId === track.id &&
+        j.format === format &&
+        (format !== "mp3" || j.quality === mp3Quality) &&
+        j.status === "done",
+    );
+  }
+
+  function fileReady(track: Track): boolean {
+    return Boolean(
+      ready[blobKey(track.id, format, mp3Quality)] ||
+        hasBlob(track.id, format, mp3Quality) ||
+        doneJobFor(track),
+    );
+  }
 
   useEffect(() => {
     let alive = true;
@@ -284,12 +302,12 @@ export function OctavaApp() {
       const filename = `${safeFilename(track.title)}.${ext}`;
       saveBlob(blob, filename);
       setProgress((p) => ({ ...p, [track.id]: 1 }));
-      noteYt("ok", `сохранено «${track.title}»`);
-      toast.success("Файл готов — нажмите «На устройство», если браузер не скачал сам", {
+      noteYt("ok", `на сервере «${track.title}»`);
+      toast.success("Файл на сервере. Если браузер не скачал — зелёная «На устройство»", {
         duration: 14_000,
         action: {
           label: "На устройство",
-          onClick: () => saveBlob(blob, filename, { picker: true }),
+          onClick: () => saveTrackToDevice(track),
         },
       });
     } catch (err) {
@@ -310,29 +328,21 @@ export function OctavaApp() {
     }
   }
 
-  async function saveTrackToDevice(track: Track) {
+  function saveTrackToDevice(track: Track) {
     const cached = getBlob(track.id, format, mp3Quality);
-    if (cached) {
+    if (cached && cached.size >= 4_096) {
       const filename = `${safeFilename(track.title)}.${extensionFor(format, cached.type)}`;
-      saveBlob(cached, filename, { picker: true });
+      saveBlob(cached, filename);
+      noteYt("ok", `на устройство «${track.title}»`);
       return;
     }
-    const done = serverJobs.find(
-      (j) =>
-        j.videoId === track.id &&
-        j.format === format &&
-        (format !== "mp3" || j.quality === mp3Quality) &&
-        j.status === "done",
-    );
+    const done = doneJobFor(track);
     if (done) {
-      try {
-        const file = await fetchJobFile(done, mp3Quality);
-        const filename = `${safeFilename(track.title)}.${extensionFor(format, file.type)}`;
-        saveBlob(file, filename, { picker: true });
-        return;
-      } catch {
-        /* fall through to a fresh job */
-      }
+      const filename =
+        done.filename || `${safeFilename(track.title)}.${extensionFor(format, done.mime)}`;
+      startBrowserDownload(jobDownloadUrl(done.jobId), filename);
+      noteYt("ok", `на устройство «${track.title}»`);
+      return;
     }
     void downloadOne(track);
   }
@@ -813,10 +823,7 @@ export function OctavaApp() {
                         )
                       : progress[track.id]
                   }
-                  saved={Boolean(
-                    ready[blobKey(track.id, format, mp3Quality)] ||
-                      hasBlob(track.id, format, mp3Quality),
-                  )}
+                  saved={fileReady(track)}
                   isPlaying={nowPlaying?.id === track.id && playing}
                   onPlay={() => playTrack(track)}
                   onDownload={() => void downloadOne(track)}
@@ -858,13 +865,11 @@ export function OctavaApp() {
         <PlayerBar
           track={nowPlaying}
           playing={playing}
-          hasFile={Boolean(
-            ready[blobKey(nowPlaying.id, format, mp3Quality)] ||
-              hasBlob(nowPlaying.id, format, mp3Quality),
-          )}
+          hasFile={fileReady(nowPlaying)}
           format={format}
           quality={mp3Quality}
           onToggle={() => setPlaying((v) => !v)}
+          onSave={() => saveTrackToDevice(nowPlaying)}
           onClose={() => {
             setPlaying(false);
             setNowPlaying(null);
@@ -1115,7 +1120,7 @@ function TrackRow({
           <Button
             variant="sage"
             size="sm"
-            aria-label="Сохранить на устройство"
+            aria-label="На устройство"
             onClick={onSave}
           >
             <Download className="size-4" />
@@ -1148,6 +1153,7 @@ function PlayerBar({
   format,
   quality,
   onToggle,
+  onSave,
   onClose,
 }: {
   track: Track;
@@ -1156,6 +1162,7 @@ function PlayerBar({
   format: AudioFormat;
   quality: Mp3Quality;
   onToggle: () => void;
+  onSave: () => void;
   onClose: () => void;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -1194,6 +1201,12 @@ function PlayerBar({
         </div>
         {fileUrl ? (
           <audio ref={audioRef} className="hidden" src={fileUrl} preload="metadata" />
+        ) : null}
+        {hasFile ? (
+          <Button variant="sage" size="sm" onClick={onSave} aria-label="На устройство">
+            <Download className="size-4" />
+            <span className="hidden sm:inline">На устройство</span>
+          </Button>
         ) : null}
         <Button
           variant="secondary"

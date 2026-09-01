@@ -72,6 +72,21 @@ export async function cancelJob(jobId: string): Promise<void> {
   await fetch(`/api/job?id=${encodeURIComponent(jobId)}`, { method: "DELETE", cache: "no-store" });
 }
 
+export function jobDownloadUrl(jobId: string): string {
+  return `/api/job?id=${encodeURIComponent(jobId)}&download=1`;
+}
+
+export function startBrowserDownload(url: string, filename: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  window.setTimeout(() => a.remove(), 8_000);
+}
+
 export async function fetchJobFile(
   job: DownloadJob,
   quality: Mp3Quality = DEFAULT_MP3_QUALITY,
