@@ -75,9 +75,9 @@ function InstallPage() {
               bash install.sh
             </pre>
             <p className="mt-2 text-muted">
-              Скрипт поставит зависимости, соберёт production-сборку, скачает yt-dlp в{" "}
-              <span className="font-mono text-fg">bin/</span>, проверит ffmpeg и
-              запустит Octava в фоне (на Ubuntu — systemd --user).
+              Скрипт поставит зависимости, соберёт production (готовые JS, не Vite
+              dev), скачает yt-dlp в <span className="font-mono text-fg">bin/</span>,
+              проверит ffmpeg и запустит Octava в фоне (на Ubuntu — systemd --user).
             </p>
           </li>
           <li className="rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">

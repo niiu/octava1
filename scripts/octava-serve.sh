@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Процесс службы Octava. systemd и «octava start» запускают этот файл.
-# Production-сборка без Vite HMR: обрыв сети не перезагружает страницу.
+# Только production: готовые JS-бандлы, без Vite HMR и без .tsx по сети.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -10,12 +10,23 @@ HOST="${OCTAVA_HOST:-0.0.0.0}"
 PORT="${OCTAVA_PORT:-8080}"
 export OCTAVA_HOST="$HOST"
 export OCTAVA_PORT="$PORT"
+export HOST
+export PORT
+export NODE_ENV=production
 
-if [ -d "$ROOT/.vercel/output/static" ]; then
-  export OCTAVA_PROD=1
-  exec node "$ROOT/scripts/with-app-env.mjs" vite preview --host "$HOST" --port "$PORT" --strictPort
+STATIC="$ROOT/.vercel/output/static"
+ENTRY="$ROOT/.vercel/output/functions/__server.func/index.mjs"
+
+if [ ! -d "$STATIC" ] || [ ! -f "$ENTRY" ]; then
+  echo "octava: нет production-сборки." >&2
+  echo "Запустите из корня проекта:  bash install.sh" >&2
+  echo "или:  npm run build && octava restart" >&2
+  exit 1
 fi
 
-echo "octava: нет production-сборки, запускаю dev без HMR" >&2
-export OCTAVA_HMR=0
-exec node "$ROOT/scripts/with-app-env.mjs" vite dev --host "$HOST" --port "$PORT"
+echo "octava: production http://${HOST}:${PORT}" >&2
+exec node "$ROOT/scripts/with-app-env.mjs" srvx serve --prod \
+  --host="$HOST" \
+  --port="$PORT" \
+  --static="$STATIC" \
+  --entry="$ENTRY"

@@ -100,8 +100,16 @@ else
   npm install
 fi
 
-say "Сборка production (без Vite HMR — страница не перезагружается при обрыве сети)"
-npm run build || echo "сборка не удалась — служба поднимется в dev без HMR"
+say "Сборка production (без Vite — страница не тянет .tsx по сети)"
+if ! npm run build; then
+  echo "Сборка не удалась. На слабом сервере попробуйте:"
+  echo "  NODE_OPTIONS=--max-old-space-size=2048 npm run build"
+  exit 1
+fi
+if [ ! -d "$ROOT/.vercel/output/static" ] || [ ! -f "$ROOT/.vercel/output/functions/__server.func/index.mjs" ]; then
+  echo "Сборка не создала .vercel/output. Повторите npm run build."
+  exit 1
+fi
 
 chmod +x "$ROOT/bin/octava" "$ROOT/scripts/octava-serve.sh" 2>/dev/null || true
 export YT_DLP_PATH="$ROOT/bin/yt-dlp"
