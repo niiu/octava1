@@ -150,10 +150,13 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
+    ...(process.env.OCTAVA_HMR === "0"
+      ? { hmr: false as const, watch: null }
+      : {}),
   },
   preview: {
-    host: "127.0.0.1",
-    port: 8081,
+    host: process.env.OCTAVA_PROD === "1" ? "0.0.0.0" : "127.0.0.1",
+    port: process.env.OCTAVA_PROD === "1" ? Number(process.env.OCTAVA_PORT || 8080) : 8081,
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },

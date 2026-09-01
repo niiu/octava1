@@ -56,7 +56,8 @@ function InstallPage() {
           </h1>
           <p className="mt-3 max-w-xl text-muted">
             YouTube часто режет загрузки с облачных IP. Скрипт ставит yt-dlp, проверяет
-            ffmpeg и поднимает Octava у вас как фоновую службу — как systemd на Ubuntu.
+            ffmpeg и поднимает Octava у вас как фоновую службу — production без Vite HMR.
+            Задания качаются на сервере: обрыв сети или перезагрузка вкладки их не сбрасывают.
           </p>
         </div>
 
@@ -74,7 +75,7 @@ function InstallPage() {
               bash install.sh
             </pre>
             <p className="mt-2 text-muted">
-              Скрипт поставит зависимости, скачает yt-dlp в{" "}
+              Скрипт поставит зависимости, соберёт production-сборку, скачает yt-dlp в{" "}
               <span className="font-mono text-fg">bin/</span>, проверит ffmpeg и
               запустит Octava в фоне (на Ubuntu — systemd --user).
             </p>

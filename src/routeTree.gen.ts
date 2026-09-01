@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as InstallRouteImport } from './routes/install'
 import { Route as ApiAudioRouteImport } from './routes/api/audio'
+import { Route as ApiJobRouteImport } from './routes/api/job'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const ApiAudioRoute = ApiAudioRouteImport.update({
   path: '/api/audio',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobRoute = ApiJobRouteImport.update({
+  id: '/api/job',
+  path: '/api/job',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/install': typeof InstallRoute
   '/api/audio': typeof ApiAudioRoute
+  '/api/job': typeof ApiJobRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/install': typeof InstallRoute
   '/api/audio': typeof ApiAudioRoute
+  '/api/job': typeof ApiJobRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/install': typeof InstallRoute
   '/api/audio': typeof ApiAudioRoute
+  '/api/job': typeof ApiJobRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/install' | '/api/audio'
+  fullPaths: '/' | '/install' | '/api/audio' | '/api/job'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/install' | '/api/audio'
-  id: '__root__' | '/' | '/install' | '/api/audio'
+  to: '/' | '/install' | '/api/audio' | '/api/job'
+  id: '__root__' | '/' | '/install' | '/api/audio' | '/api/job'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   InstallRoute: typeof InstallRoute
   ApiAudioRoute: typeof ApiAudioRoute
+  ApiJobRoute: typeof ApiJobRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAudioRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/job': {
+      id: '/api/job'
+      path: '/api/job'
+      fullPath: '/api/job'
+      preLoaderRoute: typeof ApiJobRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   InstallRoute: InstallRoute,
   ApiAudioRoute: ApiAudioRoute,
+  ApiJobRoute: ApiJobRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

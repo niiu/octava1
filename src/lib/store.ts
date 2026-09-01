@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AudioFormat, LocalPlaylist, Mp3Quality, Track } from "./media";
+import type { AudioFormat, LocalPlaylist, Mp3Quality, ResolveResult, Track } from "./media";
 import { DEFAULT_MP3_QUALITY, newId } from "./media";
 
 type Catalog = Record<string, Track>;
@@ -12,8 +12,10 @@ type AppState = {
   historyIds: string[];
   playlists: LocalPlaylist[];
   selectedIds: string[];
+  inbox: ResolveResult | null;
   setFormat: (format: AudioFormat) => void;
   setMp3Quality: (quality: Mp3Quality) => void;
+  setInbox: (inbox: ResolveResult | null) => void;
   remember: (tracks: Track[]) => void;
   toggleSelected: (id: string) => void;
   setSelected: (ids: string[]) => void;
@@ -37,8 +39,10 @@ export const useLibrary = create<AppState>()(
       historyIds: [],
       playlists: [],
       selectedIds: [],
+      inbox: null,
       setFormat: (format) => set({ format }),
       setMp3Quality: (mp3Quality) => set({ mp3Quality }),
+      setInbox: (inbox) => set({ inbox }),
       remember: (tracks) => {
         if (tracks.length === 0) return;
         const catalog = { ...get().catalog };
@@ -109,6 +113,7 @@ export const useLibrary = create<AppState>()(
         catalog: state.catalog,
         historyIds: state.historyIds,
         playlists: state.playlists,
+        inbox: state.inbox,
       }),
     },
   ),

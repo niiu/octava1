@@ -31,11 +31,12 @@ import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
 import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, fetchAudioBlob } from "@/lib/download-client";
+import { cancelJob, fetchJobFile, listJobs } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
 import { ingestYtText, noteYt, getYtDownloadRatio, resetYtDownloadRatio, subscribeYtLog } from "@/lib/yt-log-client";
-import type { AudioFormat, ExtractorCaps, Mp3Quality, ResolveResult, Track } from "@/lib/media";
+import type { AudioFormat, DownloadJob, ExtractorCaps, Mp3Quality, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
   MP3_QUALITIES,
@@ -79,7 +80,6 @@ function isAbortError(err: unknown): boolean {
 export function OctavaApp() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<ResolveResult | null>(null);
   const [caps, setCaps] = useState<ExtractorCaps | null>(null);
   const [nowPlaying, setNowPlaying] = useState<Track | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -96,6 +96,7 @@ export function OctavaApp() {
   const [ready, setReady] = useState<Record<string, boolean>>({});
   const [cookies, setCookies] = useState("");
   const [cookieCount, setCookieCount] = useState(0);
+  const [serverJobs, setServerJobs] = useState<DownloadJob[]>([]);
 
   const format = useLibrary((s) => s.format);
   const setFormat = useLibrary((s) => s.setFormat);
@@ -114,6 +115,8 @@ export function OctavaApp() {
   const removeFromPlaylist = useLibrary((s) => s.removeFromPlaylist);
   const historyIds = useLibrary((s) => s.historyIds);
   const clearHistory = useLibrary((s) => s.clearHistory);
+  const result = useLibrary((s) => s.inbox);
+  const setInbox = useLibrary((s) => s.setInbox);
 
   useEffect(() => {
     void useLibrary.persist.rehydrate();
@@ -137,6 +140,70 @@ export function OctavaApp() {
         }),
       );
   }, []);
+
+  const runningJobs = serverJobs.filter(
+    (j) => j.status === "queued" || j.status === "running",
+  );
+  const jobsBusy = runningJobs.length > 0;
+
+  useEffect(() => {
+    let alive = true;
+    const seenDone = new Set<string>();
+    async function tick() {
+      try {
+        const jobs = await listJobs();
+        if (!alive) return;
+        setServerJobs(jobs);
+        setReady((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          for (const job of jobs) {
+            if (job.status !== "done") continue;
+            const key = blobKey(job.videoId, job.format, job.quality);
+            if (!next[key]) {
+              next[key] = true;
+              changed = true;
+            }
+            if (!seenDone.has(job.jobId) && job.progress >= 1) {
+              seenDone.add(job.jobId);
+            }
+          }
+          return changed ? next : prev;
+        });
+        setProgress((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          const live = new Set<string>();
+          for (const job of jobs) {
+            if (job.status === "queued" || job.status === "running") {
+              live.add(job.videoId);
+              const ratio = Math.max(0.03, job.progress);
+              if (next[job.videoId] !== ratio) {
+                next[job.videoId] = ratio;
+                changed = true;
+              }
+            }
+          }
+          for (const id of Object.keys(next)) {
+            if (!live.has(id)) {
+              delete next[id];
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      } catch {
+        /* keep last snapshot */
+      }
+    }
+    void tick();
+    const ms = jobsBusy ? 400 : 4_000;
+    const id = window.setInterval(() => void tick(), ms);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [jobsBusy]);
 
   const ytRatio = useSyncExternalStore(subscribeYtLog, getYtDownloadRatio, getYtDownloadRatio);
 
@@ -181,7 +248,7 @@ export function OctavaApp() {
         return;
       }
       const next = out.result;
-      setResult(next);
+      setInbox(next);
       const tracks = next.kind === "video" ? [next.track] : next.tracks;
       remember(tracks);
       setActivePlaylistId("inbox");
@@ -211,7 +278,7 @@ export function OctavaApp() {
     try {
       const blob = await fetchAudioBlob(track.id, format, (ratio) => {
         setProgress((p) => ({ ...p, [track.id]: ratio }));
-      }, cookiePayload(cookies), mp3Quality);
+      }, cookiePayload(cookies), mp3Quality, undefined, track.title);
       setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
       const ext = extensionFor(format, blob.type);
       const filename = `${safeFilename(track.title)}.${ext}`;
@@ -243,18 +310,37 @@ export function OctavaApp() {
     }
   }
 
-  function saveTrackToDevice(track: Track) {
-    const file = getBlob(track.id, format, mp3Quality);
-    if (!file) {
-      void downloadOne(track);
+  async function saveTrackToDevice(track: Track) {
+    const cached = getBlob(track.id, format, mp3Quality);
+    if (cached) {
+      const filename = `${safeFilename(track.title)}.${extensionFor(format, cached.type)}`;
+      saveBlob(cached, filename, { picker: true });
       return;
     }
-    const filename = `${safeFilename(track.title)}.${extensionFor(format, file.type)}`;
-    saveBlob(file, filename, { picker: true });
+    const done = serverJobs.find(
+      (j) =>
+        j.videoId === track.id &&
+        j.format === format &&
+        (format !== "mp3" || j.quality === mp3Quality) &&
+        j.status === "done",
+    );
+    if (done) {
+      try {
+        const file = await fetchJobFile(done, mp3Quality);
+        const filename = `${safeFilename(track.title)}.${extensionFor(format, file.type)}`;
+        saveBlob(file, filename, { picker: true });
+        return;
+      } catch {
+        /* fall through to a fresh job */
+      }
+    }
+    void downloadOne(track);
   }
 
-  function cancelZip() {
+  function cancelActiveJob() {
     zipAbort.current?.abort();
+    const active = runningJobs[0];
+    if (active) void cancelJob(active.jobId);
     noteYt("warn", "отмена");
   }
 
@@ -288,16 +374,6 @@ export function OctavaApp() {
       resetYtDownloadRatio();
       setProgress((p) => ({ ...p, [track.id]: 0.03 }));
       setZip((z) => ({ ...z, current: track.title, packing: false }));
-      if (hasBlob(track.id, format, mp3Quality) || ready[blobKey(track.id, format, mp3Quality)]) {
-        ok.push(track);
-        setZip((z) => ({ ...z, done: i + 1 }));
-        setProgress((p) => {
-          const next = { ...p };
-          delete next[track.id];
-          return next;
-        });
-        continue;
-      }
       try {
         await fetchAudioBlob(
           track.id,
@@ -308,6 +384,7 @@ export function OctavaApp() {
           cookiePayload(cookies),
           mp3Quality,
           ac.signal,
+          track.title,
         );
         setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
         ok.push(track);
@@ -538,7 +615,7 @@ export function OctavaApp() {
           </div>
 
           <div className="mt-3">
-            <YtConsole busy={busy || zip.open || Boolean(fetchingId)} />
+            <YtConsole busy={busy || zip.open || Boolean(fetchingId) || jobsBusy} />
           </div>
 
           {caps && !caps.ytdlp ? (
@@ -602,7 +679,7 @@ export function OctavaApp() {
             </div>
           </div>
 
-          {zip.open || fetchingId ? (
+          {zip.open || fetchingId || jobsBusy ? (
             <div
               id="octava-job"
               className="mt-4 rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]"
@@ -614,25 +691,28 @@ export function OctavaApp() {
                       ? zip.packing
                         ? "Собираем архив"
                         : "Качаем треки"
-                      : "Качаем"}
+                      : "Качаем на сервере"}
                   </p>
                   <p className="mt-0.5 truncate text-xs text-muted">
                     {zip.open
                       ? zip.current || "…"
-                      : visibleTracks.find((t) => t.id === fetchingId)?.title || "…"}
+                      : runningJobs[0]?.title ||
+                        visibleTracks.find((t) => t.id === fetchingId)?.title ||
+                        "…"}
+                  </p>
+                  <p className="mt-1 text-xs text-subtle">
+                    Можно закрыть вкладку — задание продолжит качаться.
                   </p>
                 </div>
-                {zip.open ? (
-                  <Button
-                    id="octava-job-cancel"
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={cancelZip}
-                  >
-                    Отмена
-                  </Button>
-                ) : null}
+                <Button
+                  id="octava-job-cancel"
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={cancelActiveJob}
+                >
+                  Отмена
+                </Button>
               </div>
               <Progress
                 id="octava-zip-progress"
@@ -657,6 +737,7 @@ export function OctavaApp() {
                         Math.round(
                           Math.max(
                             ytRatio,
+                            runningJobs[0]?.progress ?? 0.03,
                             fetchingId ? (progress[fetchingId] ?? 0.03) : 0.03,
                           ) * 100,
                         ),
@@ -677,10 +758,12 @@ export function OctavaApp() {
                     {Math.round(
                       Math.max(
                         ytRatio,
+                        runningJobs[0]?.progress ?? 0.03,
                         fetchingId ? (progress[fetchingId] ?? 0.03) : 0.03,
                       ) * 100,
                     )}
                     %
+                    {runningJobs.length > 1 ? ` · ещё ${runningJobs.length - 1}` : ""}
                   </>
                 )}
               </p>
@@ -721,8 +804,13 @@ export function OctavaApp() {
                   checked={selectedIds.includes(track.id)}
                   onCheck={() => toggleSelected(track.id)}
                   progress={
-                    fetchingId === track.id
-                      ? Math.max(progress[track.id] ?? 0.03, ytRatio)
+                    fetchingId === track.id ||
+                    runningJobs.some((j) => j.videoId === track.id)
+                      ? Math.max(
+                          progress[track.id] ?? 0.03,
+                          runningJobs.find((j) => j.videoId === track.id)?.progress ?? 0,
+                          fetchingId === track.id ? ytRatio : 0,
+                        )
                       : progress[track.id]
                   }
                   saved={Boolean(

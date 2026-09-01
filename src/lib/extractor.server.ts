@@ -137,6 +137,7 @@ async function runYtDlp(
   cookieFile: string | null,
   timeoutMs: number,
   collectStdout: boolean,
+  signal?: AbortSignal,
 ): Promise<{ code: number | null; stdout: string; stderr: string; killed: boolean }> {
   const bin = ytDlpPath();
   if (!bin) {
@@ -144,6 +145,9 @@ async function runYtDlp(
       "MISSING_YTDLP",
       "yt-dlp не установлен. Откройте раздел «Установка» и запустите скрипт.",
     );
+  }
+  if (signal?.aborted) {
+    throw new ExtractorError("CANCELLED", "Отменено.");
   }
   const py = pythonBin();
   const args = [bin, ...baseArgs(cookieFile), ...extraArgs];
@@ -160,6 +164,11 @@ async function runYtDlp(
       killed = true;
       child.kill("SIGKILL");
     }, timeoutMs);
+    const onAbort = () => {
+      killed = true;
+      child.kill("SIGKILL");
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     if (child.stdout) {
       child.stdout.on("data", (chunk: Buffer) => {
         stdout += chunk.toString("utf8");
@@ -176,10 +185,12 @@ async function runYtDlp(
     });
     child.on("error", (err) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       reject(err);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       flushLogCarry(carry);
       resolve({ code, stdout, stderr, killed });
     });
@@ -280,6 +291,8 @@ function mapExecError(err: unknown): ExtractorError {
       "YouTube слишком долго отвечает. Попробуйте ещё раз.",
       stderr,
     );
+  } else if (/aborted|cancelled/i.test(blob)) {
+    mapped = new ExtractorError("CANCELLED", "Отменено.", stderr);
   } else {
     const first = blob
       .split("\n")
@@ -472,6 +485,7 @@ export async function extractAudio(
   format: AudioFormat,
   cookiesText?: string,
   quality: Mp3Quality = DEFAULT_MP3_QUALITY,
+  signal?: AbortSignal,
 ): Promise<AudioFile> {
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
     throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
@@ -512,7 +526,11 @@ export async function extractAudio(
         watchUrl(videoId),
       ];
       try {
-        const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false);
+        const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false, signal);
+        if (signal?.aborted) {
+          await rm(dir, { recursive: true, force: true }).catch(() => {});
+          throw new ExtractorError("CANCELLED", "Отменено.");
+        }
         if (proc.killed) {
           lastFail = proc;
           break;
@@ -579,6 +597,24 @@ export async function extractAudio(
   );
 }
 
+export async function streamSavedFile(
+  filePath: string,
+  filename: string,
+  mime: string,
+): Promise<Response> {
+  const info = await stat(filePath);
+  const nodeStream = createReadStream(filePath);
+  const webStream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
+  return new Response(webStream, {
+    headers: {
+      "Content-Type": mime,
+      "Content-Length": String(info.size),
+      "Content-Disposition": contentDisposition(filename),
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
 export async function streamAudioFile(file: AudioFile): Promise<Response> {
   const info = await stat(file.path);
   const nodeStream = createReadStream(file.path);
@@ -608,7 +644,9 @@ export function errorResponse(err: unknown): Response {
         ? 404
         : mapped.code === "BAD_ID" || mapped.code === "EMPTY" || mapped.code === "BAD_COOKIES"
           ? 400
-          : 502;
+          : mapped.code === "CANCELLED"
+            ? 499
+            : 502;
   const log = mapped.log || dumpLogText(40);
   return Response.json(
     { code: mapped.code, message: mapped.message, log },

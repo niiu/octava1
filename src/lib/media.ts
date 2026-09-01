@@ -60,6 +60,24 @@ export type ExtractorCaps = {
   cookieCount: number;
 };
 
+export type JobStatus = "queued" | "running" | "done" | "error" | "cancelled";
+
+export type DownloadJob = {
+  jobId: string;
+  videoId: string;
+  title: string;
+  format: AudioFormat;
+  quality: Mp3Quality;
+  status: JobStatus;
+  progress: number;
+  error?: string;
+  filename?: string;
+  mime?: string;
+  bytes?: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export const FORMAT_LABEL: Record<AudioFormat, string> = {
   m4a: "M4A",
   mp3: "MP3",

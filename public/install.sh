@@ -100,6 +100,9 @@ else
   npm install
 fi
 
+say "Сборка production (без Vite HMR — страница не перезагружается при обрыве сети)"
+npm run build || echo "сборка не удалась — служба поднимется в dev без HMR"
+
 chmod +x "$ROOT/bin/octava" "$ROOT/scripts/octava-serve.sh" 2>/dev/null || true
 export YT_DLP_PATH="$ROOT/bin/yt-dlp"
 export PATH="$ROOT/bin:${PATH}"
