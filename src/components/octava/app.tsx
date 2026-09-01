@@ -30,8 +30,8 @@ import { Wordmark } from "@/components/octava/logo";
 import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
 import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
-import { DownloadError, fetchAudioBlob } from "@/lib/download-client";
-import { cancelJob, jobDownloadUrl, listJobs, startBrowserDownload } from "@/lib/jobs-client";
+import { DownloadError, ensureServerJob } from "@/lib/download-client";
+import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, startJob, zipDownloadUrl } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
@@ -48,7 +48,7 @@ import {
   safeFilename,
   extensionFor,
 } from "@/lib/media";
-import { packTracksZip, saveBlob } from "@/lib/pack-zip";
+import { saveBlob } from "@/lib/pack-zip";
 import { useLibrary } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -294,14 +294,21 @@ export function OctavaApp() {
     setProgress((p) => ({ ...p, [track.id]: 0.03 }));
     noteYt("info", `скачивание «${track.title}»`);
     try {
-      const blob = await fetchAudioBlob(track.id, format, (ratio) => {
-        setProgress((p) => ({ ...p, [track.id]: ratio }));
-      }, cookiePayload(cookies), mp3Quality, undefined, track.title);
+      const job = await ensureServerJob(
+        track.id,
+        format,
+        (ratio) => {
+          setProgress((p) => ({ ...p, [track.id]: ratio }));
+        },
+        cookiePayload(cookies),
+        mp3Quality,
+        undefined,
+        track.title,
+      );
+      if (job.status !== "done") {
+        throw new DownloadError("JOB", job.error || "Не удалось скачать");
+      }
       setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
-      const ext = extensionFor(format, blob.type);
-      const filename = `${safeFilename(track.title)}.${ext}`;
-      saveBlob(blob, filename);
-      setProgress((p) => ({ ...p, [track.id]: 1 }));
       noteYt("ok", `на сервере «${track.title}»`);
       toast.success("Файл на сервере. Если браузер не скачал — зелёная «На устройство»", {
         duration: 14_000,
@@ -310,6 +317,14 @@ export function OctavaApp() {
           onClick: () => saveTrackToDevice(track),
         },
       });
+      void fetchJobFile(job, mp3Quality)
+        .then((blob) => {
+          const filename = `${safeFilename(track.title)}.${extensionFor(format, blob.type)}`;
+          saveBlob(blob, filename);
+        })
+        .catch(() => {
+          noteYt("warn", `браузер не забрал файл — зелёная «На устройство»`);
+        });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Ошибка загрузки";
       noteYt("error", `${track.title}: ${message}`);
@@ -317,14 +332,12 @@ export function OctavaApp() {
       toast.error(message);
     } finally {
       setFetchingId(null);
-      window.setTimeout(() => {
-        setProgress((p) => {
-          if (!(track.id in p)) return p;
-          const next = { ...p };
-          delete next[track.id];
-          return next;
-        });
-      }, 600);
+      setProgress((p) => {
+        if (!(track.id in p)) return p;
+        const next = { ...p };
+        delete next[track.id];
+        return next;
+      });
     }
   }
 
@@ -349,8 +362,8 @@ export function OctavaApp() {
 
   function cancelActiveJob() {
     zipAbort.current?.abort();
-    const active = runningJobs[0];
-    if (active) void cancelJob(active.jobId);
+    for (const job of runningJobs) void cancelJob(job.jobId);
+    setFetchingId(null);
     noteYt("warn", "отмена");
   }
 
@@ -365,69 +378,102 @@ export function OctavaApp() {
     zipAbort.current = ac;
     setZip({
       open: true,
-      current: "",
+      current: tracks[0]?.title ?? "",
       done: 0,
       total: tracks.length,
       packing: false,
       skipped: 0,
     });
-    const ok: Track[] = [];
+
+    const queued: { track: Track; jobId: string }[] = [];
     let skipped = 0;
     let cancelled = false;
-    for (let i = 0; i < tracks.length; i++) {
-      if (ac.signal.aborted) {
-        cancelled = true;
-        break;
-      }
-      const track = tracks[i]!;
-      setFetchingId(track.id);
-      resetYtDownloadRatio();
-      setProgress((p) => ({ ...p, [track.id]: 0.03 }));
-      setZip((z) => ({ ...z, current: track.title, packing: false }));
-      try {
-        await fetchAudioBlob(
-          track.id,
-          format,
-          (ratio) => {
-            setProgress((p) => ({ ...p, [track.id]: ratio }));
-          },
-          cookiePayload(cookies),
-          mp3Quality,
-          ac.signal,
-          track.title,
-        );
-        setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
-        ok.push(track);
-      } catch (err) {
-        if (ac.signal.aborted || isAbortError(err)) {
+
+    try {
+      for (const track of tracks) {
+        if (ac.signal.aborted) {
           cancelled = true;
-          noteYt("warn", `остановлено на «${track.title}»`);
           break;
         }
-        skipped += 1;
-        const message = err instanceof Error ? err.message : "не скачался";
-        noteYt("error", `${track.title}: ${message}`);
-        noteYt("warn", `пропуск «${track.title}», следующий`);
-        if (err instanceof DownloadError) ingestYtText(err.log, "error");
-        setZip((z) => ({ ...z, skipped: z.skipped + 1 }));
-      } finally {
-        setFetchingId(null);
-        if (!cancelled) setZip((z) => ({ ...z, done: i + 1 }));
-        setProgress((p) => {
-          const next = { ...p };
-          delete next[track.id];
-          return next;
+        setZip((z) => ({ ...z, current: track.title }));
+        try {
+          const job = await startJob({
+            videoId: track.id,
+            title: track.title,
+            format,
+            quality: mp3Quality,
+            cookies: cookiePayload(cookies),
+          });
+          queued.push({ track, jobId: job.jobId });
+          if (job.status === "done") {
+            setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
+          }
+        } catch (err) {
+          skipped += 1;
+          const message = err instanceof Error ? err.message : "не скачался";
+          noteYt("error", `${track.title}: ${message}`);
+          noteYt("warn", `пропуск «${track.title}», следующий`);
+          setZip((z) => ({ ...z, skipped: z.skipped + 1, done: z.done + 1 }));
+        }
+      }
+
+      while (!cancelled && !ac.signal.aborted) {
+        const live = await listJobs();
+        const mine = queued
+          .map((item) => live.find((j) => j.jobId === item.jobId))
+          .filter((j): j is DownloadJob => Boolean(j));
+        const running = mine.filter((j) => j.status === "queued" || j.status === "running");
+        const done = mine.filter((j) => j.status === "done");
+        const failed = mine.filter((j) => j.status === "error" || j.status === "cancelled");
+        for (const job of done) {
+          setReady((r) => ({ ...r, [blobKey(job.videoId, job.format, job.quality)]: true }));
+        }
+        setZip((z) => ({
+          ...z,
+          done: done.length + failed.length + skipped,
+          skipped: skipped + failed.length,
+          current: running[0]?.title || "Упаковка ZIP",
+          packing: running.length === 0,
+        }));
+        const current = running[0];
+        setFetchingId(current?.videoId ?? null);
+        if (current) {
+          setProgress((p) => ({ ...p, [current.videoId]: Math.max(0.03, current.progress) }));
+        }
+        if (running.length === 0) break;
+        await new Promise<void>((resolve, reject) => {
+          const timer = window.setTimeout(resolve, 400);
+          ac.signal.addEventListener(
+            "abort",
+            () => {
+              window.clearTimeout(timer);
+              reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+          );
         });
       }
+    } catch (err) {
+      if (isAbortError(err) || ac.signal.aborted) cancelled = true;
+      else toast.error(err instanceof Error ? err.message : "Не удалось собрать ZIP");
     }
+
     setFetchingId(null);
-    if (cancelled) {
+    if (cancelled || ac.signal.aborted) {
       zipAbort.current = null;
       toast.message("Отменено");
       setZip(ZIP_IDLE);
       return;
     }
-    if (ok.length === 0) {
+
+    const live = await listJobs().catch(() => serverJobs);
+    const doneIds = queued
+      .map((item) => live.find((j) => j.jobId === item.jobId))
+      .filter((j): j is DownloadJob => j?.status === "done")
+      .map((j) => j.jobId);
+    skipped += queued.length - doneIds.length;
+
+    if (doneIds.length === 0) {
       zipAbort.current = null;
       toast.error(
         skipped > 0
@@ -437,47 +483,28 @@ export function OctavaApp() {
       setZip(ZIP_IDLE);
       return;
     }
-    setZip((z) => ({ ...z, packing: true, current: "Упаковка ZIP" }));
-    try {
-      const packed = await packTracksZip(ok, format, (done, total, title) => {
-        setZip((z) => ({
-          ...z,
-          done,
-          total,
-          current: title || "Упаковка ZIP",
-          packing: true,
-        }));
-      }, mp3Quality);
-      if (packed.packed === 0) {
-        toast.error("В архив не попало ни одного файла");
-      } else {
-        const stamp = new Date().toISOString().slice(0, 10);
-        const name =
-          result?.kind === "playlist"
-            ? safeFilename(result.title)
-            : "octava";
-        saveBlob(packed.blob, `${name}-${stamp}.zip`);
-        const skipN = skipped + packed.skipped.length;
-        const zipName = `${name}-${stamp}.zip`;
-        toast.success(
-          skipN > 0
-            ? `ZIP: ${packed.packed} файл(ов), пропуск ${skipN}`
-            : `ZIP: ${packed.packed} файл(ов)`,
-          {
-            duration: 14_000,
-            action: {
-              label: "На устройство",
-              onClick: () => saveBlob(packed.blob, zipName, { picker: true }),
-            },
-          },
-        );
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Не удалось собрать ZIP");
-    } finally {
-      zipAbort.current = null;
-      setZip(ZIP_IDLE);
-    }
+
+    setZip((z) => ({ ...z, packing: true, current: "Упаковка ZIP", done: doneIds.length }));
+    const stamp = new Date().toISOString().slice(0, 10);
+    const name = result?.kind === "playlist" ? safeFilename(result.title) : "octava";
+    const zipName = `${name}-${stamp}.zip`;
+    const url = zipDownloadUrl(doneIds, `${name}-${stamp}`);
+    startBrowserDownload(url, zipName);
+    noteYt("ok", `ZIP ${doneIds.length} файл(ов)`);
+    toast.success(
+      skipped > 0
+        ? `ZIP: ${doneIds.length} файл(ов), пропуск ${skipped}`
+        : `ZIP: ${doneIds.length} файл(ов)`,
+      {
+        duration: 16_000,
+        action: {
+          label: "На устройство",
+          onClick: () => startBrowserDownload(url, zipName),
+        },
+      },
+    );
+    zipAbort.current = null;
+    setZip(ZIP_IDLE);
   }
 
   function submitNewPlaylist() {
@@ -814,14 +841,15 @@ export function OctavaApp() {
                   checked={selectedIds.includes(track.id)}
                   onCheck={() => toggleSelected(track.id)}
                   progress={
-                    fetchingId === track.id ||
-                    runningJobs.some((j) => j.videoId === track.id)
+                    (fetchingId === track.id ||
+                      runningJobs.some((j) => j.videoId === track.id)) &&
+                    !fileReady(track)
                       ? Math.max(
                           progress[track.id] ?? 0.03,
                           runningJobs.find((j) => j.videoId === track.id)?.progress ?? 0,
                           fetchingId === track.id ? ytRatio : 0,
                         )
-                      : progress[track.id]
+                      : undefined
                   }
                   saved={fileReady(track)}
                   isPlaying={nowPlaying?.id === track.id && playing}

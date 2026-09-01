@@ -76,6 +76,11 @@ export function jobDownloadUrl(jobId: string): string {
   return `/api/job?id=${encodeURIComponent(jobId)}&download=1`;
 }
 
+export function zipDownloadUrl(jobIds: string[], name = "octava"): string {
+  const ids = jobIds.filter(Boolean).join(",");
+  return `/api/zip?ids=${encodeURIComponent(ids)}&name=${encodeURIComponent(name)}`;
+}
+
 export function startBrowserDownload(url: string, filename: string): void {
   const a = document.createElement("a");
   a.href = url;

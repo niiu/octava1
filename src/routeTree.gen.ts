@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as InstallRouteImport } from './routes/install'
 import { Route as ApiAudioRouteImport } from './routes/api/audio'
 import { Route as ApiJobRouteImport } from './routes/api/job'
+import { Route as ApiZipRouteImport } from './routes/api/zip'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,18 +35,25 @@ const ApiJobRoute = ApiJobRouteImport.update({
   path: '/api/job',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiZipRoute = ApiZipRouteImport.update({
+  id: '/api/zip',
+  path: '/api/zip',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/install': typeof InstallRoute
   '/api/audio': typeof ApiAudioRoute
   '/api/job': typeof ApiJobRoute
+  '/api/zip': typeof ApiZipRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/install': typeof InstallRoute
   '/api/audio': typeof ApiAudioRoute
   '/api/job': typeof ApiJobRoute
+  '/api/zip': typeof ApiZipRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/install': typeof InstallRoute
   '/api/audio': typeof ApiAudioRoute
   '/api/job': typeof ApiJobRoute
+  '/api/zip': typeof ApiZipRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/install' | '/api/audio' | '/api/job'
+  fullPaths: '/' | '/install' | '/api/audio' | '/api/job' | '/api/zip'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/install' | '/api/audio' | '/api/job'
-  id: '__root__' | '/' | '/install' | '/api/audio' | '/api/job'
+  to: '/' | '/install' | '/api/audio' | '/api/job' | '/api/zip'
+  id: '__root__' | '/' | '/install' | '/api/audio' | '/api/job' | '/api/zip'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +76,7 @@ export interface RootRouteChildren {
   InstallRoute: typeof InstallRoute
   ApiAudioRoute: typeof ApiAudioRoute
   ApiJobRoute: typeof ApiJobRoute
+  ApiZipRoute: typeof ApiZipRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/zip': {
+      id: '/api/zip'
+      path: '/api/zip'
+      fullPath: '/api/zip'
+      preLoaderRoute: typeof ApiZipRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   InstallRoute: InstallRoute,
   ApiAudioRoute: ApiAudioRoute,
   ApiJobRoute: ApiJobRoute,
+  ApiZipRoute: ApiZipRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

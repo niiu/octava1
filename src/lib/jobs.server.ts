@@ -2,13 +2,14 @@ import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import JSZip from "jszip";
 import {
   ExtractorError,
   extractAudio,
   streamSavedFile,
 } from "./extractor.server";
 import type { AudioFormat, DownloadJob, JobStatus, Mp3Quality } from "./media";
-import { DEFAULT_MP3_QUALITY, extensionFor, mimeFor, newId, safeFilename } from "./media";
+import { contentDisposition, DEFAULT_MP3_QUALITY, extensionFor, mimeFor, newId, safeFilename } from "./media";
 import { dumpLogText, getDownloadProgress } from "./yt-log.server";
 
 type JobInternal = DownloadJob & { filePath?: string };
@@ -261,6 +262,36 @@ export async function streamJobFile(jobId: string): Promise<Response> {
     job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`,
     job.mime || mimeFor(job.format),
   );
+}
+
+export async function streamJobsZip(jobIds: string[], zipName = "octava.zip"): Promise<Response> {
+  await ensureLoaded();
+  const zip = new JSZip();
+  let packed = 0;
+  const used = new Set<string>();
+  for (const id of jobIds) {
+    const job = jobs.get(id);
+    if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
+    const buf = await readFile(job.filePath);
+    if (buf.byteLength < 4_096) continue;
+    packed += 1;
+    let name = job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`;
+    if (used.has(name)) name = `${packed.toString().padStart(2, "0")} ${name}`;
+    used.add(name);
+    zip.file(`${packed.toString().padStart(2, "0")} ${name}`, buf);
+  }
+  if (packed === 0) {
+    return Response.json({ code: "EMPTY", message: "Нет готовых файлов для архива." }, { status: 400 });
+  }
+  const body = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
+  const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
+  return new Response(Buffer.from(body), {
+    headers: {
+      "content-type": "application/zip",
+      "content-disposition": contentDisposition(filename),
+      "cache-control": "private, no-store",
+    },
+  });
 }
 
 export function jobErrorLog(): string {
