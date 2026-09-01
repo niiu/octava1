@@ -53,6 +53,12 @@ export async function fetchAudioBlob(
   const total = Number(res.headers.get("content-length") ?? 0);
   if (!res.body) {
     const blob = await res.blob();
+    if (blob.size < 4_096) {
+      throw new DownloadError(
+        "YOUTUBE_BLOCKED",
+        "YouTube отклонил загрузку. Обновите cookies YouTube и попробуйте снова.",
+      );
+    }
     setBlob(id, format, blob, quality);
     return blob;
   }
@@ -84,6 +90,12 @@ export async function fetchAudioBlob(
   for (const chunk of chunks) {
     view.set(chunk, offset);
     offset += chunk.byteLength;
+  }
+  if (received < 4_096) {
+    throw new DownloadError(
+      "YOUTUBE_BLOCKED",
+      "YouTube отклонил загрузку. Обновите cookies YouTube и попробуйте снова.",
+    );
   }
   const blob = new Blob([copy], { type: mime });
   setBlob(id, format, blob, quality);

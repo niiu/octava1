@@ -35,13 +35,52 @@ export async function packTracksZip(
   return { blob: out, packed, skipped };
 }
 
-export function saveBlob(blob: Blob, filename: string): void {
+type SavePickerHandle = {
+  createWritable: () => Promise<{
+    write: (data: Blob) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+
+function saveBlobAnchor(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.rel = "noopener";
+  a.style.display = "none";
   document.body.appendChild(a);
   a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 8_000);
+  window.setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 20_000);
+}
+
+export function saveBlob(
+  blob: Blob,
+  filename: string,
+  opts?: { picker?: boolean },
+): void {
+  if (opts?.picker) {
+    const picker = (
+      window as unknown as {
+        showSaveFilePicker?: (opts: { suggestedName?: string }) => Promise<SavePickerHandle>;
+      }
+    ).showSaveFilePicker;
+    if (typeof picker === "function") {
+      void picker({ suggestedName: filename })
+        .then(async (handle) => {
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        })
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          saveBlobAnchor(blob, filename);
+        });
+      return;
+    }
+  }
+  saveBlobAnchor(blob, filename);
 }

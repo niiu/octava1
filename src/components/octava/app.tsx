@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEv
 import { Link } from "@tanstack/react-router";
 import {
   Archive,
-  Check,
   Download,
   FolderPlus,
   History,
@@ -30,7 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { Wordmark } from "@/components/octava/logo";
 import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
-import { getBlobUrl, hasBlob } from "@/lib/blobs";
+import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, fetchAudioBlob } from "@/lib/download-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
@@ -215,9 +214,17 @@ export function OctavaApp() {
       }, cookiePayload(cookies), mp3Quality);
       setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
       const ext = extensionFor(format, blob.type);
-      saveBlob(blob, `${safeFilename(track.title)}.${ext}`);
+      const filename = `${safeFilename(track.title)}.${ext}`;
+      saveBlob(blob, filename);
+      setProgress((p) => ({ ...p, [track.id]: 1 }));
       noteYt("ok", `сохранено «${track.title}»`);
-      toast.success("Файл сохранён");
+      toast.success("Файл готов — нажмите «На устройство», если браузер не скачал сам", {
+        duration: 14_000,
+        action: {
+          label: "На устройство",
+          onClick: () => saveBlob(blob, filename, { picker: true }),
+        },
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Ошибка загрузки";
       noteYt("error", `${track.title}: ${message}`);
@@ -225,12 +232,25 @@ export function OctavaApp() {
       toast.error(message);
     } finally {
       setFetchingId(null);
-      setProgress((p) => {
-        const next = { ...p };
-        delete next[track.id];
-        return next;
-      });
+      window.setTimeout(() => {
+        setProgress((p) => {
+          if (!(track.id in p)) return p;
+          const next = { ...p };
+          delete next[track.id];
+          return next;
+        });
+      }, 600);
     }
+  }
+
+  function saveTrackToDevice(track: Track) {
+    const file = getBlob(track.id, format, mp3Quality);
+    if (!file) {
+      void downloadOne(track);
+      return;
+    }
+    const filename = `${safeFilename(track.title)}.${extensionFor(format, file.type)}`;
+    saveBlob(file, filename, { picker: true });
   }
 
   function cancelZip() {
@@ -351,10 +371,18 @@ export function OctavaApp() {
             : "octava";
         saveBlob(packed.blob, `${name}-${stamp}.zip`);
         const skipN = skipped + packed.skipped.length;
+        const zipName = `${name}-${stamp}.zip`;
         toast.success(
           skipN > 0
             ? `ZIP: ${packed.packed} файл(ов), пропуск ${skipN}`
             : `ZIP: ${packed.packed} файл(ов)`,
+          {
+            duration: 14_000,
+            action: {
+              label: "На устройство",
+              onClick: () => saveBlob(packed.blob, zipName, { picker: true }),
+            },
+          },
         );
       }
     } catch (err) {
@@ -510,7 +538,7 @@ export function OctavaApp() {
           </div>
 
           <div className="mt-3">
-            <YtConsole busy={busy || zip.open || Object.keys(progress).length > 0} />
+            <YtConsole busy={busy || zip.open || Boolean(fetchingId)} />
           </div>
 
           {caps && !caps.ytdlp ? (
@@ -533,8 +561,14 @@ export function OctavaApp() {
             <div className="flex flex-wrap items-center gap-2">
               <FormatSwitch
                 value={format}
-                ffmpeg={caps?.ffmpeg ?? false}
-                onChange={setFormat}
+                ffmpeg={caps?.ffmpeg !== false}
+                onChange={(next) => {
+                  if (next === "mp3" && caps && !caps.ffmpeg) {
+                    toast.message("Для MP3 нужен ffmpeg — откройте «Установка»");
+                    return;
+                  }
+                  setFormat(next);
+                }}
                 mp3Quality={mp3Quality}
                 onMp3Quality={setMp3Quality}
               />
@@ -568,7 +602,7 @@ export function OctavaApp() {
             </div>
           </div>
 
-          {zip.open ? (
+          {zip.open || fetchingId ? (
             <div
               id="octava-job"
               className="mt-4 rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]"
@@ -576,45 +610,79 @@ export function OctavaApp() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">
-                    {zip.packing ? "Собираем архив" : "Качаем треки"}
+                    {zip.open
+                      ? zip.packing
+                        ? "Собираем архив"
+                        : "Качаем треки"
+                      : "Качаем"}
                   </p>
-                  <p className="mt-0.5 truncate text-xs text-muted">{zip.current || "…"}</p>
+                  <p className="mt-0.5 truncate text-xs text-muted">
+                    {zip.open
+                      ? zip.current || "…"
+                      : visibleTracks.find((t) => t.id === fetchingId)?.title || "…"}
+                  </p>
                 </div>
-                <Button
-                  id="octava-job-cancel"
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={cancelZip}
-                >
-                  Отмена
-                </Button>
+                {zip.open ? (
+                  <Button
+                    id="octava-job-cancel"
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={cancelZip}
+                  >
+                    Отмена
+                  </Button>
+                ) : null}
               </div>
               <Progress
                 id="octava-zip-progress"
-                className="mt-3"
+                className="mt-3 h-2.5"
                 value={
-                  !zip.total
-                    ? 3
-                    : zip.packing || (!fetchingId && zip.done >= zip.total)
-                      ? 100
-                      : Math.min(
-                          99,
-                          Math.round(
-                            ((zip.done +
-                              (fetchingId ? Math.max(ytRatio, 0.03) * 0.95 : 0)) /
-                              zip.total) *
-                              100,
-                          ),
-                        )
+                  zip.open
+                    ? !zip.total
+                      ? 3
+                      : zip.packing || (!fetchingId && zip.done >= zip.total)
+                        ? 100
+                        : Math.min(
+                            99,
+                            Math.round(
+                              ((zip.done +
+                                (fetchingId ? Math.max(ytRatio, 0.03) * 0.95 : 0)) /
+                                zip.total) *
+                                100,
+                            ),
+                          )
+                    : Math.min(
+                        99,
+                        Math.round(
+                          Math.max(
+                            ytRatio,
+                            fetchingId ? (progress[fetchingId] ?? 0.03) : 0.03,
+                          ) * 100,
+                        ),
+                      )
                 }
               />
               <p className="mt-2 font-mono text-xs tabular-nums text-muted">
-                {zip.done} / {zip.total}
-                {zip.skipped > 0 ? ` · пропуск ${zip.skipped}` : ""}
-                {!zip.packing && fetchingId
-                  ? ` · ${Math.round(Math.max(ytRatio, progress[fetchingId] ?? 0) * 100)}%`
-                  : ""}
+                {zip.open ? (
+                  <>
+                    {zip.done} / {zip.total}
+                    {zip.skipped > 0 ? ` · пропуск ${zip.skipped}` : ""}
+                    {!zip.packing && fetchingId
+                      ? ` · ${Math.round(Math.max(ytRatio, progress[fetchingId] ?? 0) * 100)}%`
+                      : ""}
+                  </>
+                ) : (
+                  <>
+                    {Math.round(
+                      Math.max(
+                        ytRatio,
+                        fetchingId ? (progress[fetchingId] ?? 0.03) : 0.03,
+                      ) * 100,
+                    )}
+                    %
+                  </>
+                )}
               </p>
             </div>
           ) : null}
@@ -664,6 +732,7 @@ export function OctavaApp() {
                   isPlaying={nowPlaying?.id === track.id && playing}
                   onPlay={() => playTrack(track)}
                   onDownload={() => void downloadOne(track)}
+                  onSave={() => saveTrackToDevice(track)}
                   onAdd={() => {
                     if (playlists.length === 0) {
                       setPendingAdd([track.id]);
@@ -807,7 +876,7 @@ function FormatSwitch({
   mp3Quality: Mp3Quality;
   onMp3Quality: (q: Mp3Quality) => void;
 }) {
-  const options: AudioFormat[] = ffmpeg ? ["m4a", "mp3", "source"] : ["m4a", "source"];
+  const options: AudioFormat[] = ["m4a", "mp3", "source"];
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex rounded-md bg-raised p-1 shadow-[var(--shadow-border)]">
@@ -817,6 +886,7 @@ function FormatSwitch({
             id={`octava-format-${opt}`}
             type="button"
             onClick={() => onChange(opt)}
+            disabled={opt === "mp3" && !ffmpeg}
             className={cn(
               "h-8 rounded-sm px-2.5 text-xs font-medium",
               value === opt ? "bg-fg text-bg" : "text-muted hover:text-fg",
@@ -826,7 +896,7 @@ function FormatSwitch({
           </button>
         ))}
       </div>
-      {value === "mp3" && ffmpeg ? (
+      {value === "mp3" ? (
         <div
           className="flex items-center gap-1 rounded-md bg-raised p-1 shadow-[var(--shadow-border)]"
           role="group"
@@ -874,6 +944,7 @@ function TrackRow({
   isPlaying,
   onPlay,
   onDownload,
+  onSave,
   onAdd,
   onRemove,
 }: {
@@ -885,6 +956,7 @@ function TrackRow({
   isPlaying: boolean;
   onPlay: () => void;
   onDownload: () => void;
+  onSave: () => void;
   onAdd: () => void;
   onRemove?: () => void;
 }) {
@@ -934,7 +1006,12 @@ function TrackRow({
           ) : null}
         </p>
         {progress != null ? (
-          <Progress value={Math.round(progress * 100)} className="mt-2" />
+          <>
+            <Progress value={Math.round(progress * 100)} className="mt-2 h-2.5" />
+            <p className="mt-1 font-mono text-xs tabular-nums text-muted">
+              {Math.round(progress * 100)}%
+            </p>
+          </>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -946,15 +1023,31 @@ function TrackRow({
             <Trash2 className="size-4" />
           </Button>
         ) : null}
-        <Button
-          variant="secondary"
-          size="icon-sm"
-          aria-label="Скачать"
-          onClick={onDownload}
-          disabled={progress != null}
-        >
-          {saved ? <Check className="size-4" /> : <Download className="size-4" />}
-        </Button>
+        {saved && progress == null ? (
+          <Button
+            variant="sage"
+            size="sm"
+            aria-label="Сохранить на устройство"
+            onClick={onSave}
+          >
+            <Download className="size-4" />
+            <span className="hidden sm:inline">На устройство</span>
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="icon-sm"
+            aria-label="Скачать"
+            onClick={onDownload}
+            disabled={progress != null}
+          >
+            {progress != null ? (
+              <LoaderCircle className="size-4 animate-spin" />
+            ) : (
+              <Download className="size-4" />
+            )}
+          </Button>
+        )}
       </div>
     </li>
   );

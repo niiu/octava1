@@ -6,7 +6,7 @@ import {
   exportFromBrowser,
   saveCookieFile,
 } from "./cookie-store.server";
-import { clearLog, dumpLogText, getDownloadProgress, listLog } from "./yt-log.server";
+import { clearLog, dumpLogText, getDownloadProgress, getProgressEpoch, listLog } from "./yt-log.server";
 
 const inputSchema = z.object({
   input: z.string().trim().min(1, "Вставьте ссылку или запрос").max(500),
@@ -17,11 +17,12 @@ export const getExtractorCaps = createServerFn({ method: "GET" }).handler(
   async () => getCaps(),
 );
 
-export const getExtractorLog = createServerFn({ method: "GET" })
+export const getExtractorLog = createServerFn({ method: "POST" })
   .validator(z.object({ after: z.coerce.number().int().nonnegative().optional() }))
   .handler(async ({ data }) => ({
     lines: listLog(data.after ?? 0),
     progress: getDownloadProgress(),
+    epoch: getProgressEpoch(),
   }));
 
 export const clearExtractorLog = createServerFn({ method: "POST" }).handler(

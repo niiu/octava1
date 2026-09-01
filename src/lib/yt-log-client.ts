@@ -6,6 +6,8 @@ const listeners = new Set<() => void>();
 let lines: YtLogLine[] = [];
 let localSeq = 0;
 let downloadRatio = 0;
+let ignoreStaleUntil = 0;
+let seenEpoch = 0;
 
 function emit() {
   for (const fn of listeners) fn();
@@ -19,16 +21,25 @@ export function getYtDownloadRatio(): number {
   return downloadRatio;
 }
 
-export function setYtDownloadRatio(n: number | null | undefined): void {
+export function setYtDownloadRatio(
+  n: number | null | undefined,
+  epoch?: number,
+): void {
   const next = n == null || !Number.isFinite(n) ? 0 : Math.max(0, Math.min(1, n));
+  if (epoch != null && epoch > seenEpoch) {
+    seenEpoch = epoch;
+    ignoreStaleUntil = 0;
+  }
+  const staleHigh = next >= 0.98 && Date.now() < ignoreStaleUntil;
+  if (staleHigh) return;
   if (Math.abs(next - downloadRatio) < 0.004) return;
   downloadRatio = next;
   emit();
 }
 
 export function resetYtDownloadRatio(): void {
-  if (downloadRatio === 0) return;
   downloadRatio = 0;
+  ignoreStaleUntil = Date.now() + 2_500;
   emit();
 }
 
@@ -103,5 +114,6 @@ export function serverCursor(): number {
 export function clearYtLogLocal(): void {
   lines = [];
   downloadRatio = 0;
+  ignoreStaleUntil = 0;
   emit();
 }

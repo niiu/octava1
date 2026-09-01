@@ -211,13 +211,13 @@ export function useYtLogPoll(active = false) {
         const next = await getExtractorLog({ data: { after: serverCursor() } });
         if (!alive) return;
         mergeYtServer(next?.lines);
-        setYtDownloadRatio(next?.progress);
+        setYtDownloadRatio(next?.progress, next?.epoch);
       } catch {
         /* console is best-effort */
       }
     }
     void tick();
-    const ms = active ? 400 : 2500;
+    const ms = active ? 300 : 4000;
     const id = window.setInterval(() => void tick(), ms);
     return () => {
       alive = false;

@@ -23,6 +23,7 @@ import {
   dumpLogText,
   feedLogChunk,
   flushLogCarry,
+  resetDownloadProgress,
   sanitizeLog,
 } from "./yt-log.server";
 
@@ -483,16 +484,18 @@ export async function extractAudio(
     );
   }
 
+  resetDownloadProgress();
+  appendLog(
+    "info",
+    format === "mp3"
+      ? `скачивание ${videoId} · mp3 ${quality}k`
+      : `скачивание ${videoId} · ${format}`,
+  );
+
   return withCookieFile(cookiesText, (cookieFile) =>
     withSlot(async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
     const outTpl = path.join(dir, "%(id)s.%(ext)s");
-    appendLog(
-      "info",
-      format === "mp3"
-        ? `скачивание ${videoId} · mp3 ${quality}k`
-        : `скачивание ${videoId} · ${format}`,
-    );
     const attempts = formatAttempts(format, quality);
     let lastFail: { code: number | null; stderr: string; killed: boolean } | null =
       null;
@@ -502,6 +505,7 @@ export async function extractAudio(
         "--no-playlist",
         "--no-part",
         "--no-mtime",
+        "--progress",
         "-o",
         outTpl,
         "--",
@@ -514,6 +518,10 @@ export async function extractAudio(
           break;
         }
         if (proc.code === 0) {
+          if (/unable to download video data|HTTP Error 403/i.test(proc.stderr)) {
+            lastFail = proc;
+            break;
+          }
           lastFail = null;
           break;
         }
@@ -548,7 +556,7 @@ export async function extractAudio(
     }
     const filePath = path.join(dir, audio);
     const info = await stat(filePath);
-    if (info.size < 256) {
+    if (info.size < 4_096) {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
       throw new ExtractorError(
         "YOUTUBE_BLOCKED",

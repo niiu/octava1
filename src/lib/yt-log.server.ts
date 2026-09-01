@@ -7,6 +7,7 @@ let seq = 0;
 const lines: YtLogLine[] = [];
 let lastProgress = 0;
 let lastProgressBucket = -1;
+let progressEpoch = 0;
 
 const DOWNLOAD_PCT = /\[download\]\s+(\d+(?:\.\d+)?)%/;
 
@@ -69,9 +70,20 @@ export function getDownloadProgress(): number {
   return lastProgress;
 }
 
+export function getProgressEpoch(): number {
+  return progressEpoch;
+}
+
+export function resetDownloadProgress(): void {
+  lastProgress = 0;
+  lastProgressBucket = -1;
+  progressEpoch += 1;
+}
+
 function resetProgress() {
   lastProgress = 0;
   lastProgressBucket = -1;
+  progressEpoch += 1;
 }
 
 function applyDownloadProgress(text: string): boolean {
@@ -79,13 +91,14 @@ function applyDownloadProgress(text: string): boolean {
   if (match) {
     const pct = Math.max(0, Math.min(Number(match[1]) / 100, 1));
     lastProgress = pct;
-    const bucket = Math.floor(pct * 20);
+    const bucket = Math.floor(pct * 50);
     if (bucket === lastProgressBucket && pct < 1) return true;
     lastProgressBucket = bucket;
     return false;
   }
   if (/скачивание\s/i.test(text)) {
-    resetProgress();
+    lastProgress = 0;
+    lastProgressBucket = -1;
     return false;
   }
   if (/Destination:|ExtractAudio|has already been downloaded/i.test(text)) {
