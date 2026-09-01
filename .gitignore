@@ -6,5 +6,6 @@ node_modules/
 cookies.txt
 .run/
 data/
-.runtime/
+.vercel/
+.output/
 
