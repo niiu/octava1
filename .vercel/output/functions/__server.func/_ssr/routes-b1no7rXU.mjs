@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { C as newId, D as safeFilename, a as blobKey, b as isLikelyCookieFile, c as cookieCountLabel, g as formatDuration, h as formatBytes, i as MP3_QUALITY_LABEL, l as countCookieRows, n as FORMAT_LABEL, p as extensionFor, r as MP3_QUALITIES, w as normalizeCookieFile } from "./extractor.server-RF0ebCYR.mjs";
+import { O as safeFilename, T as normalizeCookieFile, _ as formatDuration, a as blobKey, g as formatBytes, i as MP3_QUALITY_LABEL, l as cookieCountLabel, m as extensionFor, n as FORMAT_LABEL, r as MP3_QUALITIES, u as countCookieRows, w as newId, x as isLikelyCookieFile } from "./extractor.server-cKWltcEe.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { _ as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime, n as CheckboxIndicator, t as Checkbox$1 } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
@@ -7,17 +7,17 @@ import { a as string, i as object, n as literal, t as number } from "../_libs/zo
 import { S as Archive, _ as Download, a as Terminal, b as ChevronDown, c as Plus, d as Minus, f as LoaderCircle, g as FileUp, h as FolderPlus, i as Trash2, l as Play, m as History, n as X, o as Search, p as ListMusic, s as Save, t as Youtube, u as Pause, v as Copy, x as Check, y as Cookie } from "../_libs/lucide-react.mjs";
 import { a as DialogOverlay$1, i as DialogDescription$1, n as DialogClose, o as DialogPortal$1, r as DialogContent$1, s as DialogTitle$1, t as Dialog$1 } from "../_libs/@radix-ui/react-dialog+[...].mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { n as cn } from "./router-B4dkJN26.mjs";
-import { n as Wordmark, t as Button } from "./logo-DE_kUQj5.mjs";
+import { t as require_lib } from "../_libs/jszip+[...].mjs";
+import { n as cn } from "./router-CjRNyCwP.mjs";
+import { n as Wordmark, t as Button } from "./logo-DHUc5i-F.mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { n as Root, t as Indicator } from "../_libs/radix-ui__react-progress.mjs";
 import { t as Root$1 } from "../_libs/radix-ui__react-separator.mjs";
-import { t as require_lib } from "../_libs/jszip+[...].mjs";
 import { n as create, t as persist } from "../_libs/zustand.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-BNeGgzwE.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-b1no7rXU.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
-var import_lib = /* @__PURE__ */ __toESM(require_lib());
+require_lib();
 var Checkbox = import_react.forwardRef(({ className, ...props }, ref) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Checkbox$1, {
 	ref,
 	className: cn("peer group size-5 shrink-0 rounded-xs border border-line bg-raised text-bg shadow-[var(--shadow-border)]", "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70", "data-[state=checked]:border-fg data-[state=checked]:bg-fg data-[state=checked]:text-bg", "data-[state=indeterminate]:border-fg data-[state=indeterminate]:bg-fg data-[state=indeterminate]:text-bg", "disabled:cursor-not-allowed disabled:opacity-40", className),
@@ -745,6 +745,23 @@ async function cancelJob(jobId) {
 		cache: "no-store"
 	});
 }
+function jobDownloadUrl(jobId) {
+	return `/api/job?id=${encodeURIComponent(jobId)}&download=1`;
+}
+function zipDownloadUrl(jobIds, name = "octava") {
+	const ids = jobIds.filter(Boolean).join(",");
+	return `/api/zip?ids=${encodeURIComponent(ids)}&name=${encodeURIComponent(name)}`;
+}
+function startBrowserDownload(url, filename) {
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = filename;
+	a.rel = "noopener";
+	a.style.display = "none";
+	document.body.appendChild(a);
+	a.click();
+	window.setTimeout(() => a.remove(), 8e3);
+}
 async function fetchJobFile(job, quality = "192") {
 	const res = await fetch(`/api/job?id=${encodeURIComponent(job.jobId)}&download=1`, { cache: "no-store" });
 	if (!res.ok) {
@@ -790,12 +807,9 @@ async function waitForJob(jobId, onProgress, signal) {
 		await sleep(400, signal);
 	}
 }
-async function fetchAudioBlob(id, format, onProgress, cookies, quality = "192", signal, title) {
+async function ensureServerJob(id, format, onProgress, cookies, quality = "192", signal, title) {
 	const cached = getBlob(id, format, quality);
-	if (cached && cached.size >= 4096) {
-		onProgress?.(1);
-		return cached;
-	}
+	if (cached && cached.size >= 4096) onProgress?.(1);
 	const started = await startJob({
 		videoId: id,
 		title,
@@ -804,49 +818,17 @@ async function fetchAudioBlob(id, format, onProgress, cookies, quality = "192", 
 		cookies
 	});
 	onProgress?.(Math.max(.03, started.progress));
-	let finished = started;
-	if (started.status !== "done") {
-		const onAbort = () => {
-			cancelJob(started.jobId);
-		};
-		signal?.addEventListener("abort", onAbort, { once: true });
-		try {
-			finished = await waitForJob(started.jobId, onProgress, signal);
-		} finally {
-			signal?.removeEventListener("abort", onAbort);
-		}
-	}
-	const blob = await fetchJobFile(finished, quality);
-	setBlob(id, format, blob, quality);
-	onProgress?.(1);
-	return blob;
-}
-async function packTracksZip(tracks, format, onProgress, quality = "192") {
-	const zip = new import_lib.default();
-	const skipped = [];
-	let packed = 0;
-	const total = tracks.length;
-	for (const track of tracks) {
-		onProgress?.(packed, total, track.title);
-		const blob = getBlob(track.id, format, quality);
-		if (!blob) {
-			skipped.push(track.title);
-			continue;
-		}
-		packed += 1;
-		const ext = extensionFor(format, blob.type);
-		const index = String(packed).padStart(2, "0");
-		zip.file(`${index} ${safeFilename(track.title)}.${ext}`, blob);
-	}
-	onProgress?.(packed, total, "");
-	return {
-		blob: await zip.generateAsync({
-			type: "blob",
-			compression: "STORE"
-		}),
-		packed,
-		skipped
+	if (started.status === "done" || started.status === "error") return started;
+	if (started.status === "cancelled") throw new DOMException("Aborted", "AbortError");
+	const onAbort = () => {
+		cancelJob(started.jobId);
 	};
+	signal?.addEventListener("abort", onAbort, { once: true });
+	try {
+		return await waitForJob(started.jobId, onProgress, signal);
+	} finally {
+		signal?.removeEventListener("abort", onAbort);
+	}
 }
 function saveBlobAnchor(blob, filename) {
 	const url = URL.createObjectURL(blob);
@@ -1015,6 +997,12 @@ function OctavaApp() {
 	}, []);
 	const runningJobs = serverJobs.filter((j) => j.status === "queued" || j.status === "running");
 	const jobsBusy = runningJobs.length > 0;
+	function doneJobFor(track) {
+		return serverJobs.find((j) => j.videoId === track.id && j.format === format && (format !== "mp3" || j.quality === mp3Quality) && j.status === "done");
+	}
+	function fileReady(track) {
+		return Boolean(ready[blobKey(track.id, format, mp3Quality)] || hasBlob(track.id, format, mp3Quality) || doneJobFor(track));
+	}
 	(0, import_react.useEffect)(() => {
 		let alive = true;
 		const seenDone = /* @__PURE__ */ new Set();
@@ -1136,30 +1124,29 @@ function OctavaApp() {
 		}));
 		noteYt("info", `скачивание «${track.title}»`);
 		try {
-			const blob = await fetchAudioBlob(track.id, format, (ratio) => {
+			const job = await ensureServerJob(track.id, format, (ratio) => {
 				setProgress((p) => ({
 					...p,
 					[track.id]: ratio
 				}));
 			}, cookiePayload(cookies), mp3Quality, void 0, track.title);
+			if (job.status !== "done") throw new DownloadError("JOB", job.error || "Не удалось скачать");
 			setReady((r) => ({
 				...r,
 				[blobKey(track.id, format, mp3Quality)]: true
 			}));
-			const ext = extensionFor(format, blob.type);
-			const filename = `${safeFilename(track.title)}.${ext}`;
-			saveBlob(blob, filename);
-			setProgress((p) => ({
-				...p,
-				[track.id]: 1
-			}));
-			noteYt("ok", `сохранено «${track.title}»`);
-			toast.success("Файл готов — нажмите «На устройство», если браузер не скачал сам", {
+			noteYt("ok", `на сервере «${track.title}»`);
+			toast.success("Файл на сервере. Если браузер не скачал — зелёная «На устройство»", {
 				duration: 14e3,
 				action: {
 					label: "На устройство",
-					onClick: () => saveBlob(blob, filename, { picker: true })
+					onClick: () => saveTrackToDevice(track)
 				}
+			});
+			fetchJobFile(job, mp3Quality).then((blob) => {
+				saveBlob(blob, `${safeFilename(track.title)}.${extensionFor(format, blob.type)}`);
+			}).catch(() => {
+				noteYt("warn", `браузер не забрал файл — зелёная «На устройство»`);
 			});
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Ошибка загрузки";
@@ -1168,34 +1155,34 @@ function OctavaApp() {
 			toast.error(message);
 		} finally {
 			setFetchingId(null);
-			window.setTimeout(() => {
-				setProgress((p) => {
-					if (!(track.id in p)) return p;
-					const next = { ...p };
-					delete next[track.id];
-					return next;
-				});
-			}, 600);
+			setProgress((p) => {
+				if (!(track.id in p)) return p;
+				const next = { ...p };
+				delete next[track.id];
+				return next;
+			});
 		}
 	}
-	async function saveTrackToDevice(track) {
+	function saveTrackToDevice(track) {
 		const cached = getBlob(track.id, format, mp3Quality);
-		if (cached) {
-			saveBlob(cached, `${safeFilename(track.title)}.${extensionFor(format, cached.type)}`, { picker: true });
+		if (cached && cached.size >= 4096) {
+			saveBlob(cached, `${safeFilename(track.title)}.${extensionFor(format, cached.type)}`);
+			noteYt("ok", `на устройство «${track.title}»`);
 			return;
 		}
-		const done = serverJobs.find((j) => j.videoId === track.id && j.format === format && (format !== "mp3" || j.quality === mp3Quality) && j.status === "done");
-		if (done) try {
-			const file = await fetchJobFile(done, mp3Quality);
-			saveBlob(file, `${safeFilename(track.title)}.${extensionFor(format, file.type)}`, { picker: true });
+		const done = doneJobFor(track);
+		if (done) {
+			const filename = done.filename || `${safeFilename(track.title)}.${extensionFor(format, done.mime)}`;
+			startBrowserDownload(jobDownloadUrl(done.jobId), filename);
+			noteYt("ok", `на устройство «${track.title}»`);
 			return;
-		} catch {}
+		}
 		downloadOne(track);
 	}
 	function cancelActiveJob() {
 		zipAbort.current?.abort();
-		const active = runningJobs[0];
-		if (active) cancelJob(active.jobId);
+		for (const job of runningJobs) cancelJob(job.jobId);
+		setFetchingId(null);
 		noteYt("warn", "отмена");
 	}
 	async function packSelected() {
@@ -1209,80 +1196,100 @@ function OctavaApp() {
 		zipAbort.current = ac;
 		setZip({
 			open: true,
-			current: "",
+			current: tracks[0]?.title ?? "",
 			done: 0,
 			total: tracks.length,
 			packing: false,
 			skipped: 0
 		});
-		const ok = [];
+		const queued = [];
 		let skipped = 0;
 		let cancelled = false;
-		for (let i = 0; i < tracks.length; i++) {
-			if (ac.signal.aborted) {
-				cancelled = true;
-				break;
-			}
-			const track = tracks[i];
-			setFetchingId(track.id);
-			resetYtDownloadRatio();
-			setProgress((p) => ({
-				...p,
-				[track.id]: .03
-			}));
-			setZip((z) => ({
-				...z,
-				current: track.title,
-				packing: false
-			}));
-			try {
-				await fetchAudioBlob(track.id, format, (ratio) => {
-					setProgress((p) => ({
-						...p,
-						[track.id]: ratio
-					}));
-				}, cookiePayload(cookies), mp3Quality, ac.signal, track.title);
-				setReady((r) => ({
-					...r,
-					[blobKey(track.id, format, mp3Quality)]: true
-				}));
-				ok.push(track);
-			} catch (err) {
-				if (ac.signal.aborted || isAbortError(err)) {
+		try {
+			for (const track of tracks) {
+				if (ac.signal.aborted) {
 					cancelled = true;
-					noteYt("warn", `остановлено на «${track.title}»`);
 					break;
 				}
-				skipped += 1;
-				const message = err instanceof Error ? err.message : "не скачался";
-				noteYt("error", `${track.title}: ${message}`);
-				noteYt("warn", `пропуск «${track.title}», следующий`);
-				if (err instanceof DownloadError) ingestYtText(err.log, "error");
 				setZip((z) => ({
 					...z,
-					skipped: z.skipped + 1
+					current: track.title
 				}));
-			} finally {
-				setFetchingId(null);
-				if (!cancelled) setZip((z) => ({
+				try {
+					const job = await startJob({
+						videoId: track.id,
+						title: track.title,
+						format,
+						quality: mp3Quality,
+						cookies: cookiePayload(cookies)
+					});
+					queued.push({
+						track,
+						jobId: job.jobId
+					});
+					if (job.status === "done") setReady((r) => ({
+						...r,
+						[blobKey(track.id, format, mp3Quality)]: true
+					}));
+				} catch (err) {
+					skipped += 1;
+					const message = err instanceof Error ? err.message : "не скачался";
+					noteYt("error", `${track.title}: ${message}`);
+					noteYt("warn", `пропуск «${track.title}», следующий`);
+					setZip((z) => ({
+						...z,
+						skipped: z.skipped + 1,
+						done: z.done + 1
+					}));
+				}
+			}
+			while (!cancelled && !ac.signal.aborted) {
+				const live = await listJobs();
+				const mine = queued.map((item) => live.find((j) => j.jobId === item.jobId)).filter((j) => Boolean(j));
+				const running = mine.filter((j) => j.status === "queued" || j.status === "running");
+				const done = mine.filter((j) => j.status === "done");
+				const failed = mine.filter((j) => j.status === "error" || j.status === "cancelled");
+				for (const job of done) setReady((r) => ({
+					...r,
+					[blobKey(job.videoId, job.format, job.quality)]: true
+				}));
+				setZip((z) => ({
 					...z,
-					done: i + 1
+					done: done.length + failed.length + skipped,
+					skipped: skipped + failed.length,
+					current: running[0]?.title || "Упаковка ZIP",
+					packing: running.length === 0
 				}));
-				setProgress((p) => {
-					const next = { ...p };
-					delete next[track.id];
-					return next;
+				const current = running[0];
+				setFetchingId(current?.videoId ?? null);
+				if (current) setProgress((p) => ({
+					...p,
+					[current.videoId]: Math.max(.03, current.progress)
+				}));
+				if (running.length === 0) break;
+				await new Promise((resolve, reject) => {
+					const timer = window.setTimeout(resolve, 400);
+					ac.signal.addEventListener("abort", () => {
+						window.clearTimeout(timer);
+						reject(new DOMException("Aborted", "AbortError"));
+					}, { once: true });
 				});
 			}
+		} catch (err) {
+			if (isAbortError(err) || ac.signal.aborted) cancelled = true;
+			else toast.error(err instanceof Error ? err.message : "Не удалось собрать ZIP");
 		}
 		setFetchingId(null);
-		if (cancelled) {
+		if (cancelled || ac.signal.aborted) {
 			zipAbort.current = null;
 			toast.message("Отменено");
 			setZip(ZIP_IDLE);
 			return;
 		}
-		if (ok.length === 0) {
+		const live = await listJobs().catch(() => serverJobs);
+		const doneIds = queued.map((item) => live.find((j) => j.jobId === item.jobId)).filter((j) => j?.status === "done").map((j) => j.jobId);
+		skipped += queued.length - doneIds.length;
+		if (doneIds.length === 0) {
 			zipAbort.current = null;
 			toast.error(skipped > 0 ? `Не удалось скачать выбранные треки (${skipped})` : "В архив не попало ни одного файла");
 			setZip(ZIP_IDLE);
@@ -1291,39 +1298,24 @@ function OctavaApp() {
 		setZip((z) => ({
 			...z,
 			packing: true,
-			current: "Упаковка ZIP"
+			current: "Упаковка ZIP",
+			done: doneIds.length
 		}));
-		try {
-			const packed = await packTracksZip(ok, format, (done, total, title) => {
-				setZip((z) => ({
-					...z,
-					done,
-					total,
-					current: title || "Упаковка ZIP",
-					packing: true
-				}));
-			}, mp3Quality);
-			if (packed.packed === 0) toast.error("В архив не попало ни одного файла");
-			else {
-				const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-				const name = result?.kind === "playlist" ? safeFilename(result.title) : "octava";
-				saveBlob(packed.blob, `${name}-${stamp}.zip`);
-				const skipN = skipped + packed.skipped.length;
-				const zipName = `${name}-${stamp}.zip`;
-				toast.success(skipN > 0 ? `ZIP: ${packed.packed} файл(ов), пропуск ${skipN}` : `ZIP: ${packed.packed} файл(ов)`, {
-					duration: 14e3,
-					action: {
-						label: "На устройство",
-						onClick: () => saveBlob(packed.blob, zipName, { picker: true })
-					}
-				});
+		const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+		const name = result?.kind === "playlist" ? safeFilename(result.title) : "octava";
+		const zipName = `${name}-${stamp}.zip`;
+		const url = zipDownloadUrl(doneIds, `${name}-${stamp}`);
+		startBrowserDownload(url, zipName);
+		noteYt("ok", `ZIP ${doneIds.length} файл(ов)`);
+		toast.success(skipped > 0 ? `ZIP: ${doneIds.length} файл(ов), пропуск ${skipped}` : `ZIP: ${doneIds.length} файл(ов)`, {
+			duration: 16e3,
+			action: {
+				label: "На устройство",
+				onClick: () => startBrowserDownload(url, zipName)
 			}
-		} catch (err) {
-			toast.error(err instanceof Error ? err.message : "Не удалось собрать ZIP");
-		} finally {
-			zipAbort.current = null;
-			setZip(ZIP_IDLE);
-		}
+		});
+		zipAbort.current = null;
+		setZip(ZIP_IDLE);
 	}
 	function submitNewPlaylist() {
 		const id = createPlaylist(newPlName);
@@ -1605,8 +1597,8 @@ function OctavaApp() {
 									track,
 									checked: selectedIds.includes(track.id),
 									onCheck: () => toggleSelected(track.id),
-									progress: fetchingId === track.id || runningJobs.some((j) => j.videoId === track.id) ? Math.max(progress[track.id] ?? .03, runningJobs.find((j) => j.videoId === track.id)?.progress ?? 0, fetchingId === track.id ? ytRatio : 0) : progress[track.id],
-									saved: Boolean(ready[blobKey(track.id, format, mp3Quality)] || hasBlob(track.id, format, mp3Quality)),
+									progress: (fetchingId === track.id || runningJobs.some((j) => j.videoId === track.id)) && !fileReady(track) ? Math.max(progress[track.id] ?? .03, runningJobs.find((j) => j.videoId === track.id)?.progress ?? 0, fetchingId === track.id ? ytRatio : 0) : void 0,
+									saved: fileReady(track),
 									isPlaying: nowPlaying?.id === track.id && playing,
 									onPlay: () => playTrack(track),
 									onDownload: () => void downloadOne(track),
@@ -1640,10 +1632,11 @@ function OctavaApp() {
 			nowPlaying ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PlayerBar, {
 				track: nowPlaying,
 				playing,
-				hasFile: Boolean(ready[blobKey(nowPlaying.id, format, mp3Quality)] || hasBlob(nowPlaying.id, format, mp3Quality)),
+				hasFile: fileReady(nowPlaying),
 				format,
 				quality: mp3Quality,
 				onToggle: () => setPlaying((v) => !v),
+				onSave: () => saveTrackToDevice(nowPlaying),
 				onClose: () => {
 					setPlaying(false);
 					setNowPlaying(null);
@@ -1848,7 +1841,7 @@ function TrackRow({ track, checked, onCheck, progress, saved, isPlaying, onPlay,
 					saved && progress == null ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
 						variant: "sage",
 						size: "sm",
-						"aria-label": "Сохранить на устройство",
+						"aria-label": "На устройство",
 						onClick: onSave,
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "size-4" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 							className: "hidden sm:inline",
@@ -1867,7 +1860,7 @@ function TrackRow({ track, checked, onCheck, progress, saved, isPlaying, onPlay,
 		]
 	});
 }
-function PlayerBar({ track, playing, hasFile, format, quality, onToggle, onClose }) {
+function PlayerBar({ track, playing, hasFile, format, quality, onToggle, onSave, onClose }) {
 	const audioRef = (0, import_react.useRef)(null);
 	const fileUrl = hasFile ? getBlobUrl(track.id, format, quality) : void 0;
 	(0, import_react.useEffect)(() => {
@@ -1910,6 +1903,16 @@ function PlayerBar({ track, playing, hasFile, format, quality, onToggle, onClose
 					className: "hidden",
 					src: fileUrl,
 					preload: "metadata"
+				}) : null,
+				hasFile ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
+					variant: "sage",
+					size: "sm",
+					onClick: onSave,
+					"aria-label": "На устройство",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "size-4" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+						className: "hidden sm:inline",
+						children: "На устройство"
+					})]
 				}) : null,
 				/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
 					variant: "secondary",

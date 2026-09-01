@@ -1,4 +1,4 @@
-//#region node_modules/.nitro/vite/services/ssr/assets/_tanstack-start-manifest_v-D8SOzZGk.js
+//#region node_modules/.nitro/vite/services/ssr/assets/_tanstack-start-manifest_v-BYaXe6E1.js
 var tsrStartManifest = () => ({ routes: {
 	__root__: {
 		filePath: "/workspace/src/routes/__root.tsx",
@@ -6,24 +6,25 @@ var tsrStartManifest = () => ({ routes: {
 			"/",
 			"/install",
 			"/api/audio",
-			"/api/job"
+			"/api/job",
+			"/api/zip"
 		],
-		preloads: ["/assets/index-B6U7jJBr.js", "/assets/dist-C4JHsXJx.js"],
+		preloads: ["/assets/index-dOt-3dSu.js", "/assets/dist-C4JHsXJx.js"],
 		scripts: [{ attrs: {
 			type: "module",
 			async: !0,
-			src: "/assets/index-B6U7jJBr.js"
+			src: "/assets/index-dOt-3dSu.js"
 		} }]
 	},
 	"/": {
 		filePath: "/workspace/src/routes/index.tsx",
 		children: void 0,
-		preloads: ["/assets/routes-CEloXhNr.js", "/assets/logo-BEDIhiIx.js"]
+		preloads: ["/assets/routes-Cyq5o7y0.js", "/assets/logo-BEDIhiIx.js"]
 	},
 	"/install": {
 		filePath: "/workspace/src/routes/install.tsx",
 		children: void 0,
-		preloads: ["/assets/install-mVHzcDS-.js", "/assets/logo-BEDIhiIx.js"]
+		preloads: ["/assets/install-CDmrIa3r.js", "/assets/logo-BEDIhiIx.js"]
 	}
 } });
 //#endregion

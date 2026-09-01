@@ -89,7 +89,7 @@ var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 * the dev styles URL for route-scoped CSS collection.
 */
 async function getStartManifest(matchedRoutes) {
-	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-D8SOzZGk.mjs");
+	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-BYaXe6E1.mjs");
 	const startManifest = tsrStartManifest();
 	let routes = startManifest.routes;
 	routes[rootRouteId];
@@ -111,31 +111,31 @@ async function getStartManifest(matchedRoutes) {
 var manifest = {
 	"471041d278f466bbbcd911e755bffb17b696a719a103b0c38afabd3b26143b21": {
 		functionName: "getExtractorLog_createServerFn_handler",
-		importer: () => import("./media.functions-ZdFFwAwS.mjs")
+		importer: () => import("./media.functions-DffKDcv5.mjs")
 	},
 	"6e5565706d3911bd6e2e3cfd69c38da374a83ee36be0a91b2ad7e105e7eb0184": {
 		functionName: "saveYoutubeCookies_createServerFn_handler",
-		importer: () => import("./media.functions-ZdFFwAwS.mjs")
+		importer: () => import("./media.functions-DffKDcv5.mjs")
 	},
 	"76b99b627836fa9ae6745eafd568542168a86d786d5abd33801d69699fa5d02a": {
 		functionName: "getExtractorCaps_createServerFn_handler",
-		importer: () => import("./media.functions-ZdFFwAwS.mjs")
+		importer: () => import("./media.functions-DffKDcv5.mjs")
 	},
 	"7e356af630bd8842a70e21ae4d5acf69fbaf908febfd6b21f4ee151cf81033db": {
 		functionName: "resolveMedia_createServerFn_handler",
-		importer: () => import("./media.functions-ZdFFwAwS.mjs")
+		importer: () => import("./media.functions-DffKDcv5.mjs")
 	},
 	"95c635c2c518a34193e9ccc5e28496400ad795c19aa2397ebeb4435a5d2ee5fd": {
 		functionName: "exportYoutubeCookies_createServerFn_handler",
-		importer: () => import("./media.functions-ZdFFwAwS.mjs")
+		importer: () => import("./media.functions-DffKDcv5.mjs")
 	},
 	"a21b784f4fc6be40740d08075b5e8b5b817d30c590e837e4cd420ee39db4587f": {
 		functionName: "clearYoutubeCookies_createServerFn_handler",
-		importer: () => import("./media.functions-ZdFFwAwS.mjs")
+		importer: () => import("./media.functions-DffKDcv5.mjs")
 	},
 	"fa1365f86a87bf5ba813312150f394883694e110e7e93bd7ed294ffe3257599f": {
 		functionName: "clearExtractorLog_createServerFn_handler",
-		importer: () => import("./media.functions-ZdFFwAwS.mjs")
+		importer: () => import("./media.functions-DffKDcv5.mjs")
 	}
 };
 async function getServerFnById(id, access) {
@@ -1405,7 +1405,7 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-B4dkJN26.mjs").then((n) => n.t),
+		import("./router-CjRNyCwP.mjs").then((n) => n.t),
 		import("./start-5Z2QO8AU.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);

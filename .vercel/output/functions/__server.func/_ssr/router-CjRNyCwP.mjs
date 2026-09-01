@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { A as streamSavedFile, C as newId, D as safeFilename, S as mimeFor, T as parseMp3Quality, d as errorResponse, k as streamAudioFile, m as extractAudio, p as extensionFor, t as ExtractorError, v as getDownloadProgress } from "./extractor.server-RF0ebCYR.mjs";
+import { A as streamAudioFile, C as mimeFor, E as parseMp3Quality, O as safeFilename, c as contentDisposition, f as errorResponse, h as extractAudio, j as streamSavedFile, m as extensionFor, t as ExtractorError, w as newId, y as getDownloadProgress } from "./extractor.server-cKWltcEe.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { f as createRouter, g as createRootRoute, h as createFileRoute, l as Scripts, m as lazyRouteComponent, p as Outlet, u as HeadContent, v as useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
@@ -9,13 +9,15 @@ import { n as Portal, r as Provider, t as Content2 } from "../_libs/@radix-ui/re
 import { n as clsx } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
 import { t as Toaster } from "../_libs/sonner.mjs";
+import { t as require_lib } from "../_libs/jszip+[...].mjs";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { copyFile, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-B4dkJN26.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-CjRNyCwP.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
+var import_lib = /* @__PURE__ */ __toESM(require_lib());
 var __defProp = Object.defineProperty;
 var __exportAll = (all, no_symbols) => {
 	let target = {};
@@ -315,7 +317,7 @@ var TooltipContent = import_react.forwardRef(({ className, sideOffset = 6, ...pr
 TooltipContent.displayName = Content2.displayName;
 var styles_default = "/assets/styles-DYKicUj8.css";
 var APP_NAME = "Octava";
-var Route$4 = createRootRoute({
+var Route$5 = createRootRoute({
 	head: () => ({
 		meta: [
 			{ charSet: "utf-8" },
@@ -391,10 +393,10 @@ function RootDocument() {
 		})]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./routes-BNeGgzwE.mjs");
-var Route$3 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$1, "component") });
-var $$splitComponentImporter = () => import("./install-CQRvNqit.mjs");
-var Route$2 = createFileRoute("/install")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
+var $$splitComponentImporter$1 = () => import("./routes-b1no7rXU.mjs");
+var Route$4 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$1, "component") });
+var $$splitComponentImporter = () => import("./install-CvDao9aL.mjs");
+var Route$3 = createFileRoute("/install")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
 var FORMATS$1 = /* @__PURE__ */ new Set([
 	"m4a",
 	"mp3",
@@ -408,7 +410,7 @@ async function handleAudio(id, format, cookies, quality) {
 	const file = await extractAudio(id, format, cookies, quality);
 	return streamAudioFile(file);
 }
-var Route$1 = createFileRoute("/api/audio")({ server: { handlers: {
+var Route$2 = createFileRoute("/api/audio")({ server: { handlers: {
 	GET: async ({ request }) => {
 		const url = new URL(request.url);
 		const id = url.searchParams.get("id") ?? "";
@@ -643,6 +645,37 @@ async function streamJobFile(jobId) {
 	}, { status: 404 });
 	return streamSavedFile(job.filePath, job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`, job.mime || mimeFor(job.format));
 }
+async function streamJobsZip(jobIds, zipName = "octava.zip") {
+	await ensureLoaded();
+	const zip = new import_lib.default();
+	let packed = 0;
+	const used = /* @__PURE__ */ new Set();
+	for (const id of jobIds) {
+		const job = jobs.get(id);
+		if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
+		const buf = await readFile(job.filePath);
+		if (buf.byteLength < 4096) continue;
+		packed += 1;
+		let name = job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`;
+		if (used.has(name)) name = `${packed.toString().padStart(2, "0")} ${name}`;
+		used.add(name);
+		zip.file(`${packed.toString().padStart(2, "0")} ${name}`, buf);
+	}
+	if (packed === 0) return Response.json({
+		code: "EMPTY",
+		message: "Нет готовых файлов для архива."
+	}, { status: 400 });
+	const body = await zip.generateAsync({
+		type: "uint8array",
+		compression: "STORE"
+	});
+	const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
+	return new Response(Buffer.from(body), { headers: {
+		"content-type": "application/zip",
+		"content-disposition": contentDisposition(filename),
+		"cache-control": "private, no-store"
+	} });
+}
 var FORMATS = /* @__PURE__ */ new Set([
 	"m4a",
 	"mp3",
@@ -652,7 +685,7 @@ function parseFormat(raw) {
 	const value = typeof raw === "string" ? raw : "m4a";
 	return FORMATS.has(value) ? value : "m4a";
 }
-var Route = createFileRoute("/api/job")({ server: { handlers: {
+var Route$1 = createFileRoute("/api/job")({ server: { handlers: {
 	GET: async ({ request }) => {
 		const url = new URL(request.url);
 		const id = url.searchParams.get("id") ?? "";
@@ -704,29 +737,44 @@ var Route = createFileRoute("/api/job")({ server: { handlers: {
 		return Response.json({ job });
 	}
 } } });
+var Route = createFileRoute("/api/zip")({ server: { handlers: { GET: async ({ request }) => {
+	const url = new URL(request.url);
+	const ids = (url.searchParams.get("ids") ?? "").split(",").map((id) => id.trim()).filter(Boolean).slice(0, 40);
+	if (ids.length === 0) return Response.json({
+		code: "BAD_ID",
+		message: "Нет id заданий"
+	}, { status: 400 });
+	const rawName = url.searchParams.get("name")?.trim() || "octava";
+	return streamJobsZip(ids, `${safeFilename(rawName)}.zip`);
+} } } });
 var rootRouteChildren = {
-	IndexRoute: Route$3.update({
+	IndexRoute: Route$4.update({
 		id: "/",
 		path: "/",
-		getParentRoute: () => Route$4
+		getParentRoute: () => Route$5
 	}),
-	InstallRoute: Route$2.update({
+	InstallRoute: Route$3.update({
 		id: "/install",
 		path: "/install",
-		getParentRoute: () => Route$4
+		getParentRoute: () => Route$5
 	}),
-	ApiAudioRoute: Route$1.update({
+	ApiAudioRoute: Route$2.update({
 		id: "/api/audio",
 		path: "/api/audio",
-		getParentRoute: () => Route$4
+		getParentRoute: () => Route$5
 	}),
-	ApiJobRoute: Route.update({
+	ApiJobRoute: Route$1.update({
 		id: "/api/job",
 		path: "/api/job",
-		getParentRoute: () => Route$4
+		getParentRoute: () => Route$5
+	}),
+	ApiZipRoute: Route.update({
+		id: "/api/zip",
+		path: "/api/zip",
+		getParentRoute: () => Route$5
 	})
 };
-var routeTree = Route$4._addFileChildren(rootRouteChildren)._addFileTypes();
+var routeTree = Route$5._addFileChildren(rootRouteChildren)._addFileTypes();
 var router_exports = /* @__PURE__ */ __exportAll({ getRouter: () => getRouter });
 function getRouter() {
 	return createRouter({

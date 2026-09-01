@@ -1,11 +1,11 @@
 import { Readable } from "node:stream";
 import { createReadStream, existsSync } from "node:fs";
 import path from "node:path";
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
-//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-RF0ebCYR.js
+//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-cKWltcEe.js
 var MP3_QUALITIES = [
 	"320",
 	"192",
@@ -323,6 +323,36 @@ function expiryUnix(c) {
 	if (!Number.isFinite(raw) || raw <= 0) return 0;
 	return raw > 0xe8d4a51000 ? Math.round(raw / 1e3) : Math.round(raw);
 }
+var versionCache = /* @__PURE__ */ new Map();
+function pythonVersionCode(bin) {
+	const hit = versionCache.get(bin);
+	if (hit != null) return hit;
+	const result = spawnSync(bin, ["-c", "import sys;print(sys.version_info.major*100+sys.version_info.minor)"], {
+		encoding: "utf8",
+		timeout: 4e3
+	});
+	const code = result.status === 0 ? Number.parseInt((result.stdout || "").trim(), 10) || 0 : 0;
+	versionCache.set(bin, code);
+	return code;
+}
+function pythonBin() {
+	const candidates = [
+		process.env.OCTAVA_PYTHON,
+		path.join(process.cwd(), ".runtime/python"),
+		"/usr/bin/python3.14",
+		"/usr/bin/python3.13",
+		"/usr/bin/python3.12",
+		"/usr/bin/python3.11",
+		"/usr/local/bin/python3",
+		"/usr/bin/python3",
+		"python3"
+	].filter((bin) => Boolean(bin));
+	for (const bin of candidates) {
+		if ((bin.startsWith("/") || bin.startsWith(".")) && !existsSync(bin)) continue;
+		if (pythonVersionCode(bin) >= 311) return bin;
+	}
+	return candidates.find((bin) => existsSync(bin) || !bin.startsWith("/")) || "python3";
+}
 var execFileAsync = promisify(execFile);
 var BROWSERS = [
 	"chrome",
@@ -330,11 +360,6 @@ var BROWSERS = [
 	"firefox",
 	"brave"
 ];
-function pythonBin$1() {
-	if (existsSync("/usr/bin/python3.11")) return "/usr/bin/python3.11";
-	if (existsSync("/usr/local/bin/python3")) return "/usr/local/bin/python3";
-	return "python3";
-}
 function ytDlpPath$1() {
 	const candidates = [
 		process.env.YT_DLP_PATH,
@@ -420,7 +445,7 @@ function browsersWithProfile() {
 async function exportFromBrowser() {
 	const bin = ytDlpPath$1();
 	if (!bin) throw new Error("yt-dlp не установлен — откройте «Установка».");
-	const py = pythonBin$1();
+	const py = pythonBin();
 	const available = browsersWithProfile();
 	if (available.length === 0) throw new Error("На этой машине нет профиля Chrome / Firefox / Brave. Вставьте cookies.txt в поле.");
 	const tmp = path.join(os.tmpdir(), `octava-browser-cookies-${process.pid}.txt`);
@@ -564,11 +589,6 @@ function clearLog() {
 var MAX_PLAYLIST = 40;
 var JSON_TIMEOUT_MS = 45e3;
 var DOWNLOAD_TIMEOUT_MS = 18e4;
-function pythonBin() {
-	if (existsSync("/usr/bin/python3.11")) return "/usr/bin/python3.11";
-	if (existsSync("/usr/local/bin/python3")) return "/usr/local/bin/python3";
-	return "python3";
-}
 function ytDlpPath() {
 	const candidates = [
 		process.env.YT_DLP_PATH,
@@ -1017,4 +1037,4 @@ function errorResponse(err) {
 	}, { status });
 }
 //#endregion
-export { streamSavedFile as A, newId as C, safeFilename as D, resolveInput as E, saveCookieFile as O, mimeFor as S, parseMp3Quality as T, getCaps as _, blobKey as a, isLikelyCookieFile as b, cookieCountLabel as c, errorResponse as d, exportFromBrowser as f, formatDuration as g, formatBytes as h, MP3_QUALITY_LABEL as i, streamAudioFile as k, countCookieRows as l, extractAudio as m, FORMAT_LABEL as n, clearCookieFile as o, extensionFor as p, MP3_QUALITIES as r, clearLog as s, ExtractorError as t, dumpLogText as u, getDownloadProgress as v, normalizeCookieFile as w, listLog as x, getProgressEpoch as y };
+export { streamAudioFile as A, mimeFor as C, resolveInput as D, parseMp3Quality as E, safeFilename as O, listLog as S, normalizeCookieFile as T, formatDuration as _, blobKey as a, getProgressEpoch as b, contentDisposition as c, dumpLogText as d, errorResponse as f, formatBytes as g, extractAudio as h, MP3_QUALITY_LABEL as i, streamSavedFile as j, saveCookieFile as k, cookieCountLabel as l, extensionFor as m, FORMAT_LABEL as n, clearCookieFile as o, exportFromBrowser as p, MP3_QUALITIES as r, clearLog as s, ExtractorError as t, countCookieRows as u, getCaps as v, newId as w, isLikelyCookieFile as x, getDownloadProgress as y };
