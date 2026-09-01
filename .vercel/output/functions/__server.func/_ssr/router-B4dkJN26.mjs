@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { C as parseMp3Quality, D as streamAudioFile, d as errorResponse, m as extractAudio } from "./extractor.server-DNRMIXe4.mjs";
+import { A as streamSavedFile, C as newId, D as safeFilename, S as mimeFor, T as parseMp3Quality, d as errorResponse, k as streamAudioFile, m as extractAudio, p as extensionFor, t as ExtractorError, v as getDownloadProgress } from "./extractor.server-RF0ebCYR.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { f as createRouter, g as createRootRoute, h as createFileRoute, l as Scripts, m as lazyRouteComponent, p as Outlet, u as HeadContent, v as useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
@@ -9,7 +9,11 @@ import { n as Portal, r as Provider, t as Content2 } from "../_libs/@radix-ui/re
 import { n as clsx } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
 import { t as Toaster } from "../_libs/sonner.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-Dsw8ZjTe.js
+import { existsSync, mkdirSync } from "node:fs";
+import path from "node:path";
+import { copyFile, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import os from "node:os";
+//#region node_modules/.nitro/vite/services/ssr/assets/router-B4dkJN26.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -309,9 +313,9 @@ var TooltipContent = import_react.forwardRef(({ className, sideOffset = 6, ...pr
 	...props
 }) }));
 TooltipContent.displayName = Content2.displayName;
-var styles_default = "/assets/styles-B54ypt2X.css";
+var styles_default = "/assets/styles-DYKicUj8.css";
 var APP_NAME = "Octava";
-var Route$3 = createRootRoute({
+var Route$4 = createRootRoute({
 	head: () => ({
 		meta: [
 			{ charSet: "utf-8" },
@@ -387,28 +391,28 @@ function RootDocument() {
 		})]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./routes-BeS_0FTB.mjs");
-var Route$2 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$1, "component") });
-var $$splitComponentImporter = () => import("./install-X26G888v.mjs");
-var Route$1 = createFileRoute("/install")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
-var FORMATS = /* @__PURE__ */ new Set([
+var $$splitComponentImporter$1 = () => import("./routes-BNeGgzwE.mjs");
+var Route$3 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$1, "component") });
+var $$splitComponentImporter = () => import("./install-CQRvNqit.mjs");
+var Route$2 = createFileRoute("/install")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
+var FORMATS$1 = /* @__PURE__ */ new Set([
 	"m4a",
 	"mp3",
 	"source"
 ]);
-function parseFormat(raw) {
+function parseFormat$1(raw) {
 	const formatRaw = raw ?? "m4a";
-	return FORMATS.has(formatRaw) ? formatRaw : "m4a";
+	return FORMATS$1.has(formatRaw) ? formatRaw : "m4a";
 }
 async function handleAudio(id, format, cookies, quality) {
 	const file = await extractAudio(id, format, cookies, quality);
 	return streamAudioFile(file);
 }
-var Route = createFileRoute("/api/audio")({ server: { handlers: {
+var Route$1 = createFileRoute("/api/audio")({ server: { handlers: {
 	GET: async ({ request }) => {
 		const url = new URL(request.url);
 		const id = url.searchParams.get("id") ?? "";
-		const format = parseFormat(url.searchParams.get("format"));
+		const format = parseFormat$1(url.searchParams.get("format"));
 		const quality = parseMp3Quality(url.searchParams.get("quality"));
 		try {
 			return await handleAudio(id, format, void 0, quality);
@@ -419,30 +423,310 @@ var Route = createFileRoute("/api/audio")({ server: { handlers: {
 	POST: async ({ request }) => {
 		try {
 			const body = await request.json();
-			return await handleAudio(typeof body.id === "string" ? body.id : "", parseFormat(typeof body.format === "string" ? body.format : "m4a"), typeof body.cookies === "string" ? body.cookies : void 0, parseMp3Quality(body.quality));
+			return await handleAudio(typeof body.id === "string" ? body.id : "", parseFormat$1(typeof body.format === "string" ? body.format : "m4a"), typeof body.cookies === "string" ? body.cookies : void 0, parseMp3Quality(body.quality));
 		} catch (err) {
 			return errorResponse(err);
 		}
 	}
 } } });
+var jobs = /* @__PURE__ */ new Map();
+var cookiesByJob = /* @__PURE__ */ new Map();
+var controllers = /* @__PURE__ */ new Map();
+var loaded = false;
+var persistTimer = null;
+var jobsDir = "";
+var MAX_JOBS = 40;
+function publicJob(job) {
+	return {
+		jobId: job.jobId,
+		videoId: job.videoId,
+		title: job.title,
+		format: job.format,
+		quality: job.quality,
+		status: job.status,
+		progress: job.progress,
+		error: job.error,
+		filename: job.filename,
+		mime: job.mime,
+		bytes: job.bytes,
+		createdAt: job.createdAt,
+		updatedAt: job.updatedAt
+	};
+}
+function resolveDir() {
+	const preferred = process.env.OCTAVA_DATA || path.join(process.cwd(), "data", "jobs");
+	try {
+		mkdirSync(preferred, { recursive: true });
+		return preferred;
+	} catch {
+		const fallback = path.join(os.tmpdir(), "octava-jobs");
+		mkdirSync(fallback, { recursive: true });
+		return fallback;
+	}
+}
+function indexPath() {
+	return path.join(jobsDir, "index.json");
+}
+async function ensureLoaded() {
+	if (loaded) return;
+	loaded = true;
+	jobsDir = resolveDir();
+	try {
+		const raw = await readFile(indexPath(), "utf8");
+		const parsed = JSON.parse(raw);
+		for (const job of parsed.jobs ?? []) {
+			if (!job?.jobId) continue;
+			if (job.status === "queued" || job.status === "running") {
+				if (job.filePath && existsSync(job.filePath)) {
+					const info = await stat(job.filePath).catch(() => null);
+					if (info && info.size >= 4096) {
+						job.status = "done";
+						job.progress = 1;
+						job.bytes = info.size;
+					} else {
+						job.status = "error";
+						job.error = "прервано при перезапуске службы — нажмите скачать снова";
+					}
+				} else {
+					job.status = "error";
+					job.error = "прервано при перезапуске службы — нажмите скачать снова";
+				}
+				job.updatedAt = Date.now();
+			}
+			jobs.set(job.jobId, job);
+		}
+	} catch {}
+}
+function schedulePersist() {
+	if (persistTimer) return;
+	persistTimer = setTimeout(() => {
+		persistTimer = null;
+		const payload = JSON.stringify({ jobs: [...jobs.values()] });
+		writeFile(indexPath(), payload, "utf8").catch(() => void 0);
+	}, 250);
+}
+function patch(jobId, partial) {
+	const job = jobs.get(jobId);
+	if (!job) return null;
+	Object.assign(job, partial, { updatedAt: Date.now() });
+	schedulePersist();
+	return job;
+}
+function reuseKey(videoId, format, quality) {
+	return `${videoId}::${format}::${quality}`;
+}
+function findReusable(videoId, format, quality) {
+	const key = reuseKey(videoId, format, quality);
+	let best;
+	for (const job of jobs.values()) {
+		if (reuseKey(job.videoId, job.format, job.quality) !== key) continue;
+		if (job.status === "running" || job.status === "queued") return job;
+		if (job.status === "done" && job.filePath && existsSync(job.filePath)) best = job;
+	}
+	return best;
+}
+async function prune() {
+	if (jobs.size <= MAX_JOBS) return;
+	const idle = [...jobs.values()].filter((j) => j.status === "done" || j.status === "error" || j.status === "cancelled").sort((a, b) => a.updatedAt - b.updatedAt);
+	while (jobs.size > MAX_JOBS && idle.length > 0) {
+		const old = idle.shift();
+		if (!old) break;
+		if (old.filePath) await unlink(old.filePath).catch(() => void 0);
+		jobs.delete(old.jobId);
+	}
+	schedulePersist();
+}
+async function runJob(jobId) {
+	const job = jobs.get(jobId);
+	if (!job) return;
+	const ac = controllers.get(jobId);
+	patch(jobId, {
+		status: "running",
+		progress: .03
+	});
+	const tick = setInterval(() => {
+		const current = jobs.get(jobId);
+		if (!current || current.status !== "running") return;
+		patch(jobId, { progress: Math.max(current.progress, getDownloadProgress() || .03) });
+	}, 400);
+	try {
+		const file = await extractAudio(job.videoId, job.format, cookiesByJob.get(jobId), job.quality, ac?.signal);
+		const ext = path.extname(file.path) || `.${extensionFor(job.format, file.mime)}`;
+		const dest = path.join(jobsDir, `${job.jobId}${ext}`);
+		await copyFile(file.path, dest);
+		const info = await stat(dest);
+		await file.cleanup().catch(() => void 0);
+		patch(jobId, {
+			status: "done",
+			progress: 1,
+			filePath: dest,
+			filename: `${safeFilename(job.title)}.${ext.replace(/^\./, "")}`,
+			mime: file.mime || mimeFor(job.format),
+			bytes: info.size
+		});
+	} catch (err) {
+		if (ac?.signal.aborted) {
+			patch(jobId, {
+				status: "cancelled",
+				error: "отменено",
+				progress: 0
+			});
+			return;
+		}
+		const mapped = err instanceof ExtractorError ? err : null;
+		patch(jobId, {
+			status: "error",
+			error: mapped?.message || (err instanceof Error ? err.message : "не скачался")
+		});
+		if (mapped?.log) {}
+	} finally {
+		clearInterval(tick);
+		cookiesByJob.delete(jobId);
+		controllers.delete(jobId);
+		await prune();
+	}
+}
+async function listJobs() {
+	await ensureLoaded();
+	return [...jobs.values()].sort((a, b) => b.updatedAt - a.updatedAt).map(publicJob);
+}
+async function getJob(jobId) {
+	await ensureLoaded();
+	const job = jobs.get(jobId);
+	return job ? publicJob(job) : null;
+}
+async function startJob(input) {
+	await ensureLoaded();
+	const quality = input.quality ?? "192";
+	const existing = findReusable(input.videoId, input.format, quality);
+	if (existing) return publicJob(existing);
+	const jobId = newId("job");
+	const now = Date.now();
+	const job = {
+		jobId,
+		videoId: input.videoId,
+		title: (input.title || input.videoId).trim() || input.videoId,
+		format: input.format,
+		quality,
+		status: "queued",
+		progress: 0,
+		createdAt: now,
+		updatedAt: now
+	};
+	jobs.set(jobId, job);
+	cookiesByJob.set(jobId, input.cookies);
+	const ac = new AbortController();
+	controllers.set(jobId, ac);
+	schedulePersist();
+	runJob(jobId);
+	return publicJob(job);
+}
+async function cancelJob(jobId) {
+	await ensureLoaded();
+	const job = jobs.get(jobId);
+	if (!job) return null;
+	if (job.status === "done") return publicJob(job);
+	controllers.get(jobId)?.abort();
+	patch(jobId, {
+		status: "cancelled",
+		error: "отменено"
+	});
+	cookiesByJob.delete(jobId);
+	return publicJob(jobs.get(jobId));
+}
+async function streamJobFile(jobId) {
+	await ensureLoaded();
+	const job = jobs.get(jobId);
+	if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) return Response.json({
+		code: "NOT_FOUND",
+		message: "Файл ещё не готов."
+	}, { status: 404 });
+	return streamSavedFile(job.filePath, job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`, job.mime || mimeFor(job.format));
+}
+var FORMATS = /* @__PURE__ */ new Set([
+	"m4a",
+	"mp3",
+	"source"
+]);
+function parseFormat(raw) {
+	const value = typeof raw === "string" ? raw : "m4a";
+	return FORMATS.has(value) ? value : "m4a";
+}
+var Route = createFileRoute("/api/job")({ server: { handlers: {
+	GET: async ({ request }) => {
+		const url = new URL(request.url);
+		const id = url.searchParams.get("id") ?? "";
+		if (url.searchParams.get("download") && id) return streamJobFile(id);
+		if (id) {
+			const job = await getJob(id);
+			if (!job) return Response.json({
+				code: "NOT_FOUND",
+				message: "Нет такого задания"
+			}, { status: 404 });
+			return Response.json({ job });
+		}
+		return Response.json({ jobs: await listJobs() });
+	},
+	POST: async ({ request }) => {
+		try {
+			const body = await request.json();
+			const videoId = typeof body.videoId === "string" ? body.videoId : typeof body.id === "string" ? body.id : "";
+			if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return Response.json({
+				code: "BAD_ID",
+				message: "Некорректный идентификатор ролика."
+			}, { status: 400 });
+			const job = await startJob({
+				videoId,
+				title: typeof body.title === "string" ? body.title : videoId,
+				format: parseFormat(body.format),
+				quality: parseMp3Quality(body.quality),
+				cookies: typeof body.cookies === "string" ? body.cookies : void 0
+			});
+			return Response.json({ job });
+		} catch (err) {
+			return Response.json({
+				code: "JOB",
+				message: err instanceof Error ? err.message : "Не удалось создать задание"
+			}, { status: 500 });
+		}
+	},
+	DELETE: async ({ request }) => {
+		const id = new URL(request.url).searchParams.get("id") ?? "";
+		if (!id) return Response.json({
+			code: "BAD_ID",
+			message: "Нет id задания"
+		}, { status: 400 });
+		const job = await cancelJob(id);
+		if (!job) return Response.json({
+			code: "NOT_FOUND",
+			message: "Нет такого задания"
+		}, { status: 404 });
+		return Response.json({ job });
+	}
+} } });
 var rootRouteChildren = {
-	IndexRoute: Route$2.update({
+	IndexRoute: Route$3.update({
 		id: "/",
 		path: "/",
-		getParentRoute: () => Route$3
+		getParentRoute: () => Route$4
 	}),
-	InstallRoute: Route$1.update({
+	InstallRoute: Route$2.update({
 		id: "/install",
 		path: "/install",
-		getParentRoute: () => Route$3
+		getParentRoute: () => Route$4
 	}),
-	ApiAudioRoute: Route.update({
+	ApiAudioRoute: Route$1.update({
 		id: "/api/audio",
 		path: "/api/audio",
-		getParentRoute: () => Route$3
+		getParentRoute: () => Route$4
+	}),
+	ApiJobRoute: Route.update({
+		id: "/api/job",
+		path: "/api/job",
+		getParentRoute: () => Route$4
 	})
 };
-var routeTree = Route$3._addFileChildren(rootRouteChildren)._addFileTypes();
+var routeTree = Route$4._addFileChildren(rootRouteChildren)._addFileTypes();
 var router_exports = /* @__PURE__ */ __exportAll({ getRouter: () => getRouter });
 function getRouter() {
 	return createRouter({

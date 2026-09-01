@@ -5,7 +5,7 @@ import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
-//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-DNRMIXe4.js
+//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-RF0ebCYR.js
 var MP3_QUALITIES = [
 	"320",
 	"192",
@@ -459,6 +459,7 @@ var seq = 0;
 var lines = [];
 var lastProgress = 0;
 var lastProgressBucket = -1;
+var progressEpoch = 0;
 var DOWNLOAD_PCT = /\[download\]\s+(\d+(?:\.\d+)?)%/;
 var RELOAD_LINE = /please reload|reload this page|reload the page|needs to be reloaded|page needs to be reload/i;
 var BOT_LINE = /sign in to confirm|not a bot/i;
@@ -489,22 +490,32 @@ function classify(text) {
 function getDownloadProgress() {
 	return lastProgress;
 }
+function getProgressEpoch() {
+	return progressEpoch;
+}
+function resetDownloadProgress() {
+	lastProgress = 0;
+	lastProgressBucket = -1;
+	progressEpoch += 1;
+}
 function resetProgress() {
 	lastProgress = 0;
 	lastProgressBucket = -1;
+	progressEpoch += 1;
 }
 function applyDownloadProgress(text) {
 	const match = text.match(DOWNLOAD_PCT);
 	if (match) {
 		const pct = Math.max(0, Math.min(Number(match[1]) / 100, 1));
 		lastProgress = pct;
-		const bucket = Math.floor(pct * 20);
+		const bucket = Math.floor(pct * 50);
 		if (bucket === lastProgressBucket && pct < 1) return true;
 		lastProgressBucket = bucket;
 		return false;
 	}
 	if (/скачивание\s/i.test(text)) {
-		resetProgress();
+		lastProgress = 0;
+		lastProgressBucket = -1;
 		return false;
 	}
 	if (/Destination:|ExtractAudio|has already been downloaded/i.test(text)) lastProgress = Math.max(lastProgress, .92);
@@ -623,9 +634,10 @@ async function withCookieFile(raw, fn) {
 		});
 	}
 }
-async function runYtDlp(extraArgs, cookieFile, timeoutMs, collectStdout) {
+async function runYtDlp(extraArgs, cookieFile, timeoutMs, collectStdout, signal) {
 	const bin = ytDlpPath();
 	if (!bin) throw new ExtractorError("MISSING_YTDLP", "yt-dlp не установлен. Откройте раздел «Установка» и запустите скрипт.");
+	if (signal?.aborted) throw new ExtractorError("CANCELLED", "Отменено.");
 	const py = pythonBin();
 	const args = [
 		bin,
@@ -652,6 +664,11 @@ async function runYtDlp(extraArgs, cookieFile, timeoutMs, collectStdout) {
 			killed = true;
 			child.kill("SIGKILL");
 		}, timeoutMs);
+		const onAbort = () => {
+			killed = true;
+			child.kill("SIGKILL");
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
 		if (child.stdout) child.stdout.on("data", (chunk) => {
 			stdout += chunk.toString("utf8");
 			if (stdout.length > 16777216) stdout = stdout.slice(-8388608);
@@ -664,10 +681,12 @@ async function runYtDlp(extraArgs, cookieFile, timeoutMs, collectStdout) {
 		});
 		child.on("error", (err) => {
 			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
 			reject(err);
 		});
 		child.on("close", (code) => {
 			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
 			flushLogCarry(carry);
 			resolve({
 				code,
@@ -722,6 +741,7 @@ function mapExecError(err) {
 	else if (/ffmpeg exited with code -?11|signal 11|SIGSEGV/i.test(blob)) mapped = new ExtractorError("FFMPEG", "ffmpeg не смог перекодировать этот файл. Попробуйте формат M4A или «как есть».", stderr);
 	else if (/HTTP Error 403|403: Forbidden/i.test(blob)) mapped = new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube в поле на главной или запустите скрипт установки у себя.", stderr);
 	else if (anyErr.killed) mapped = new ExtractorError("TIMEOUT", "YouTube слишком долго отвечает. Попробуйте ещё раз.", stderr);
+	else if (/aborted|cancelled/i.test(blob)) mapped = new ExtractorError("CANCELLED", "Отменено.", stderr);
 	else mapped = new ExtractorError("EXTRACT", blob.split("\n").map((l) => l.trim()).find((l) => l.startsWith("ERROR:"))?.replace(/^ERROR:\s*/i, "") || "Не удалось разобрать ссылку.", stderr);
 	return mapped;
 }
@@ -856,13 +876,14 @@ function formatAttempts(format, quality) {
 function isRetryableFormatError(stderr) {
 	return /requested format is not available/i.test(stderr);
 }
-async function extractAudio(videoId, format, cookiesText, quality = "192") {
+async function extractAudio(videoId, format, cookiesText, quality = "192", signal) {
 	if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
 	if (!ytDlpPath()) throw new ExtractorError("MISSING_YTDLP", "yt-dlp не установлен. Откройте раздел «Установка».");
+	resetDownloadProgress();
+	appendLog("info", format === "mp3" ? `скачивание ${videoId} · mp3 ${quality}k` : `скачивание ${videoId} · ${format}`);
 	return withCookieFile(cookiesText, (cookieFile) => withSlot(async () => {
 		const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
 		const outTpl = path.join(dir, "%(id)s.%(ext)s");
-		appendLog("info", format === "mp3" ? `скачивание ${videoId} · mp3 ${quality}k` : `скачивание ${videoId} · ${format}`);
 		const attempts = formatAttempts(format, quality);
 		let lastFail = null;
 		for (let i = 0; i < attempts.length; i++) {
@@ -871,18 +892,30 @@ async function extractAudio(videoId, format, cookiesText, quality = "192") {
 				"--no-playlist",
 				"--no-part",
 				"--no-mtime",
+				"--progress",
 				"-o",
 				outTpl,
 				"--",
 				watchUrl(videoId)
 			];
 			try {
-				const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false);
+				const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false, signal);
+				if (signal?.aborted) {
+					await rm(dir, {
+						recursive: true,
+						force: true
+					}).catch(() => {});
+					throw new ExtractorError("CANCELLED", "Отменено.");
+				}
 				if (proc.killed) {
 					lastFail = proc;
 					break;
 				}
 				if (proc.code === 0) {
+					if (/unable to download video data|HTTP Error 403/i.test(proc.stderr)) {
+						lastFail = proc;
+						break;
+					}
 					lastFail = null;
 					break;
 				}
@@ -922,7 +955,7 @@ async function extractAudio(videoId, format, cookiesText, quality = "192") {
 		}
 		const filePath = path.join(dir, audio);
 		const info = await stat(filePath);
-		if (info.size < 256) {
+		if (info.size < 4096) {
 			await rm(dir, {
 				recursive: true,
 				force: true
@@ -946,6 +979,17 @@ async function extractAudio(videoId, format, cookiesText, quality = "192") {
 		};
 	}));
 }
+async function streamSavedFile(filePath, filename, mime) {
+	const info = await stat(filePath);
+	const nodeStream = createReadStream(filePath);
+	const webStream = Readable.toWeb(nodeStream);
+	return new Response(webStream, { headers: {
+		"Content-Type": mime,
+		"Content-Length": String(info.size),
+		"Content-Disposition": contentDisposition(filename),
+		"Cache-Control": "private, no-store"
+	} });
+}
 async function streamAudioFile(file) {
 	const info = await stat(file.path);
 	const nodeStream = createReadStream(file.path);
@@ -964,7 +1008,7 @@ async function streamAudioFile(file) {
 }
 function errorResponse(err) {
 	const mapped = err instanceof ExtractorError ? err : mapExecError(err);
-	const status = mapped.code === "MISSING_YTDLP" ? 503 : mapped.code === "NOT_FOUND" || mapped.code === "UNAVAILABLE" ? 404 : mapped.code === "BAD_ID" || mapped.code === "EMPTY" || mapped.code === "BAD_COOKIES" ? 400 : 502;
+	const status = mapped.code === "MISSING_YTDLP" ? 503 : mapped.code === "NOT_FOUND" || mapped.code === "UNAVAILABLE" ? 404 : mapped.code === "BAD_ID" || mapped.code === "EMPTY" || mapped.code === "BAD_COOKIES" ? 400 : mapped.code === "CANCELLED" ? 499 : 502;
 	const log = mapped.log || dumpLogText(40);
 	return Response.json({
 		code: mapped.code,
@@ -973,4 +1017,4 @@ function errorResponse(err) {
 	}, { status });
 }
 //#endregion
-export { parseMp3Quality as C, streamAudioFile as D, saveCookieFile as E, normalizeCookieFile as S, safeFilename as T, getCaps as _, blobKey as a, listLog as b, cookieCountLabel as c, errorResponse as d, exportFromBrowser as f, formatDuration as g, formatBytes as h, MP3_QUALITY_LABEL as i, countCookieRows as l, extractAudio as m, FORMAT_LABEL as n, clearCookieFile as o, extensionFor as p, MP3_QUALITIES as r, clearLog as s, ExtractorError as t, dumpLogText as u, getDownloadProgress as v, resolveInput as w, newId as x, isLikelyCookieFile as y };
+export { streamSavedFile as A, newId as C, safeFilename as D, resolveInput as E, saveCookieFile as O, mimeFor as S, parseMp3Quality as T, getCaps as _, blobKey as a, isLikelyCookieFile as b, cookieCountLabel as c, errorResponse as d, exportFromBrowser as f, formatDuration as g, formatBytes as h, MP3_QUALITY_LABEL as i, streamAudioFile as k, countCookieRows as l, extractAudio as m, FORMAT_LABEL as n, clearCookieFile as o, extensionFor as p, MP3_QUALITIES as r, clearLog as s, ExtractorError as t, dumpLogText as u, getDownloadProgress as v, normalizeCookieFile as w, listLog as x, getProgressEpoch as y };

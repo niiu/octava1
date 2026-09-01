@@ -4,8 +4,8 @@ import { _ as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
 import { _ as Download, v as Copy, x as Check } from "../_libs/lucide-react.mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { n as Wordmark, t as Button } from "./logo-Duh7TuyC.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/install-X26G888v.js
+import { n as Wordmark, t as Button } from "./logo-DE_kUQj5.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/install-CQRvNqit.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var FALLBACK_SCRIPT = `#!/usr/bin/env bash
@@ -54,7 +54,7 @@ function InstallPage() {
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						className: "mt-3 max-w-xl text-muted",
-						children: "YouTube часто режет загрузки с облачных IP. Скрипт ставит yt-dlp, проверяет ffmpeg и поднимает Octava у вас как фоновую службу — как systemd на Ubuntu."
+						children: "YouTube часто режет загрузки с облачных IP. Скрипт ставит yt-dlp, проверяет ffmpeg и поднимает Octava у вас как фоновую службу — production без Vite HMR. Задания качаются на сервере: обрыв сети или перезагрузка вкладки их не сбрасывают."
 					})
 				] }),
 				/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ol", {
@@ -91,7 +91,7 @@ function InstallPage() {
 								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 									className: "mt-2 text-muted",
 									children: [
-										"Скрипт поставит зависимости, скачает yt-dlp в",
+										"Скрипт поставит зависимости, соберёт production-сборку, скачает yt-dlp в",
 										" ",
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 											className: "font-mono text-fg",
