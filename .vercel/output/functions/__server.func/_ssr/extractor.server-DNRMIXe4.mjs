@@ -5,7 +5,7 @@ import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
-//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-DpbQsftP.js
+//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-DNRMIXe4.js
 var MP3_QUALITIES = [
 	"320",
 	"192",
@@ -274,7 +274,10 @@ function slimNetscape(raw) {
 		const row = `${parts[0]}\t${parts[1]}\t${parts[2]}\t${parts[3]}\t${parts[4]}\t${name}\t${value}`;
 		kept.push(httpOnly ? `#HttpOnly_${row}` : row);
 	}
-	if (kept.length === 1) throw new Error("В файле нет cookies входа на YouTube (SID / LOGIN_INFO). Экспортируйте cookies.txt, будучи авторизованы.");
+	const keptNames = new Set(kept.slice(1).map((line) => {
+		return (line.startsWith("#HttpOnly_") ? line.slice(10) : line).split("	")[5] ?? "";
+	}));
+	if (!keptNames.has("SID") && !keptNames.has("LOGIN_INFO") && !keptNames.has("__Secure-1PSID") && !keptNames.has("__Secure-3PSID")) throw new Error("В файле нет cookies входа на YouTube (SID / LOGIN_INFO). Экспортируйте cookies.txt, будучи авторизованы.");
 	return `${kept.join("\n")}\n`;
 }
 function jsonCookies(text) {
@@ -590,7 +593,7 @@ function baseArgs(cookieFile) {
 		"--no-check-certificates",
 		"--newline",
 		"--extractor-args",
-		"youtube:player_client=web_embedded,web_safari,-tv_downgraded,-tv"
+		"youtube:player_client=default,-tv_downgraded"
 	];
 	const file = cookieFile === void 0 ? cookiesPath() : cookieFile;
 	if (file) args.push("--cookies", file);
@@ -837,7 +840,17 @@ function formatAttempts(format, quality) {
 		"--audio-quality",
 		mp3FfmpegQuality(quality)
 	]];
-	if (format === "m4a") return [["-f", "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b"], ["-f", "ba/b"]];
+	if (format === "m4a") return [
+		[
+			"-f",
+			"bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best",
+			"-x",
+			"--audio-format",
+			"m4a"
+		],
+		["-f", "ba[ext=m4a]/ba/b"],
+		["-f", "ba/b"]
+	];
 	return [["-f", "ba[ext=m4a]/ba/b"], ["-f", "ba/b"]];
 }
 function isRetryableFormatError(stderr) {

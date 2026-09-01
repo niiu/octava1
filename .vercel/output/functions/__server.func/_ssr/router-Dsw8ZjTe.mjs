@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { C as parseMp3Quality, D as streamAudioFile, d as errorResponse, m as extractAudio } from "./extractor.server-DpbQsftP.mjs";
+import { C as parseMp3Quality, D as streamAudioFile, d as errorResponse, m as extractAudio } from "./extractor.server-DNRMIXe4.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { f as createRouter, g as createRootRoute, h as createFileRoute, l as Scripts, m as lazyRouteComponent, p as Outlet, u as HeadContent, v as useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
@@ -9,7 +9,7 @@ import { n as Portal, r as Provider, t as Content2 } from "../_libs/@radix-ui/re
 import { n as clsx } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
 import { t as Toaster } from "../_libs/sonner.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-C1f3XRYG.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-Dsw8ZjTe.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -387,9 +387,9 @@ function RootDocument() {
 		})]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./routes-CqS_t6rR.mjs");
+var $$splitComponentImporter$1 = () => import("./routes-BeS_0FTB.mjs");
 var Route$2 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$1, "component") });
-var $$splitComponentImporter = () => import("./install-CTrWsL_G.mjs");
+var $$splitComponentImporter = () => import("./install-X26G888v.mjs");
 var Route$1 = createFileRoute("/install")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
 var FORMATS = /* @__PURE__ */ new Set([
 	"m4a",
