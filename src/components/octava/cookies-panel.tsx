@@ -51,7 +51,10 @@ export function CookiesPanel({ value, onChange, savedCount, onStatus }: Props) {
   useEffect(() => {
     setAgreed(loadCookieConsent());
     const stored = loadStoredCookies();
-    if (stored) onStatusRef.current(countCookieRows(stored));
+    if (stored) {
+      saveStoredCookies(stored);
+      onStatusRef.current(countCookieRows(loadStoredCookies() || stored));
+    }
   }, []);
 
   async function persist(raw: string, source: string) {

@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { a as blobKey, b as newId, c as cookieCountLabel, g as formatDuration, h as formatBytes, i as MP3_QUALITY_LABEL, l as countCookieRows, n as FORMAT_LABEL, p as extensionFor, r as MP3_QUALITIES, v as isLikelyCookieFile, w as safeFilename, x as normalizeCookieFile } from "./extractor.server-DFsUbsnn.mjs";
+import { S as normalizeCookieFile, T as safeFilename, a as blobKey, c as cookieCountLabel, g as formatDuration, h as formatBytes, i as MP3_QUALITY_LABEL, l as countCookieRows, n as FORMAT_LABEL, p as extensionFor, r as MP3_QUALITIES, x as newId, y as isLikelyCookieFile } from "./extractor.server-CqGYxN9G.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { _ as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime, n as CheckboxIndicator, t as Checkbox$1 } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
@@ -7,14 +7,14 @@ import { a as string, i as object, n as literal, t as number } from "../_libs/zo
 import { S as Archive, _ as Download, a as Terminal, b as ChevronDown, c as Plus, d as Minus, f as LoaderCircle, g as FileUp, h as FolderPlus, i as Trash2, l as Play, m as History, n as X, o as Search, p as ListMusic, s as Save, t as Youtube, u as Pause, v as Copy, x as Check, y as Cookie } from "../_libs/lucide-react.mjs";
 import { a as DialogOverlay$1, i as DialogDescription$1, n as DialogClose, o as DialogPortal$1, r as DialogContent$1, s as DialogTitle$1, t as Dialog$1 } from "../_libs/@radix-ui/react-dialog+[...].mjs";
 import { n as toast } from "../_libs/sonner.mjs";
-import { n as cn } from "./router-GyBrEjAi.mjs";
-import { n as Wordmark, t as Button } from "./logo-CY5XAm4x.mjs";
+import { n as cn } from "./router-hI0P5XGt.mjs";
+import { n as Wordmark, t as Button } from "./logo-Cjc_YVZl.mjs";
 import { n as TSS_SERVER_FUNCTION, r as getServerFnById, t as createServerFn } from "./ssr.mjs";
 import { n as Root, t as Indicator } from "../_libs/radix-ui__react-progress.mjs";
 import { t as Root$1 } from "../_libs/radix-ui__react-separator.mjs";
 import { t as require_lib } from "../_libs/jszip+[...].mjs";
 import { n as create, t as persist } from "../_libs/zustand.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-DV4yNOGn.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-B3UU2P2T.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var import_lib = /* @__PURE__ */ __toESM(require_lib());
@@ -133,8 +133,15 @@ function loadStoredCookies() {
 function saveStoredCookies(raw) {
 	try {
 		const text = raw.trim();
-		if (text) localStorage.setItem(COOKIES_KEY, text);
-		else localStorage.removeItem(COOKIES_KEY);
+		if (!text) {
+			localStorage.removeItem(COOKIES_KEY);
+			return;
+		}
+		let stored = text;
+		try {
+			stored = normalizeCookieFile(text);
+		} catch {}
+		localStorage.setItem(COOKIES_KEY, stored);
 	} catch {}
 }
 function clearStoredCookies() {
@@ -143,9 +150,13 @@ function clearStoredCookies() {
 	} catch {}
 }
 function cookiePayload(field) {
-	const fromField = field.trim();
-	if (fromField) return fromField;
-	return loadStoredCookies().trim() || void 0;
+	const raw = (field.trim() || loadStoredCookies()).trim();
+	if (!raw) return void 0;
+	try {
+		return normalizeCookieFile(raw);
+	} catch {
+		return raw;
+	}
 }
 var createSsrRpc = (functionId) => {
 	const url = "/_serverFn/" + functionId;
@@ -184,7 +195,10 @@ function CookiesPanel({ value, onChange, savedCount, onStatus }) {
 	(0, import_react.useEffect)(() => {
 		setAgreed(loadCookieConsent());
 		const stored = loadStoredCookies();
-		if (stored) onStatusRef.current(countCookieRows(stored));
+		if (stored) {
+			saveStoredCookies(stored);
+			onStatusRef.current(countCookieRows(loadStoredCookies() || stored));
+		}
 	}, []);
 	async function persist(raw, source) {
 		setBusy(true);
@@ -428,11 +442,26 @@ var MAX = 180;
 var listeners = /* @__PURE__ */ new Set();
 var lines = [];
 var localSeq = 0;
+var downloadRatio = 0;
 function emit() {
 	for (const fn of listeners) fn();
 }
 function getYtLines() {
 	return lines;
+}
+function getYtDownloadRatio() {
+	return downloadRatio;
+}
+function setYtDownloadRatio(n) {
+	const next = n == null || !Number.isFinite(n) ? 0 : Math.max(0, Math.min(1, n));
+	if (Math.abs(next - downloadRatio) < .004) return;
+	downloadRatio = next;
+	emit();
+}
+function resetYtDownloadRatio() {
+	if (downloadRatio === 0) return;
+	downloadRatio = 0;
+	emit();
 }
 function subscribeYtLog(fn) {
 	listeners.add(fn);
@@ -443,9 +472,19 @@ function subscribeYtLog(fn) {
 function seenRecently(text) {
 	return lines.slice(-24).some((line) => line.text === text);
 }
+var DOWNLOAD_PCT = /\[download\]\s+(\d+(?:\.\d+)?)%/;
+function ratioFromText(text) {
+	const match = text.match(DOWNLOAD_PCT);
+	if (match) return Math.max(0, Math.min(Number(match[1]) / 100, 1));
+	if (/скачивание\s/i.test(text)) return 0;
+	if (/готово\s|Destination:|ExtractAudio/i.test(text)) return Math.max(downloadRatio, .92);
+	return null;
+}
 function noteYt(level, text) {
 	const trimmed = text.replace(/\s+/g, " ").trim();
 	if (!trimmed || seenRecently(trimmed)) return;
+	const fromText = ratioFromText(trimmed);
+	if (fromText != null) setYtDownloadRatio(fromText);
 	localSeq += 1;
 	lines = [...lines, {
 		id: -localSeq,
@@ -457,10 +496,14 @@ function noteYt(level, text) {
 	emit();
 }
 function mergeYtServer(incoming) {
-	if (incoming.length === 0) return;
+	if (!incoming || incoming.length === 0) return;
 	const seen = new Set(lines.filter((l) => l.id > 0).map((l) => l.id));
 	const add = incoming.filter((l) => l.id > 0 && !seen.has(l.id) && !seenRecently(l.text));
 	if (add.length === 0) return;
+	for (const line of add) {
+		const fromText = ratioFromText(line.text);
+		if (fromText != null) downloadRatio = fromText;
+	}
 	lines = [...lines, ...add].sort((a, b) => a.t - b.t || a.id - b.id);
 	if (lines.length > MAX) lines = lines.slice(-180);
 	emit();
@@ -480,6 +523,7 @@ function serverCursor() {
 }
 function clearYtLogLocal() {
 	lines = [];
+	downloadRatio = 0;
 	emit();
 }
 var LEVEL_LABEL = {
@@ -491,39 +535,13 @@ var LEVEL_LABEL = {
 function YtConsole({ busy = false }) {
 	const lines = (0, import_react.useSyncExternalStore)(subscribeYtLog, getYtLines, getYtLines);
 	const [open, setOpen] = (0, import_react.useState)(false);
-	const scroller = (0, import_react.useRef)(null);
 	const lastError = [...lines].reverse().find((l) => l.level === "error");
 	const last = lines[lines.length - 1];
 	const status = lastError && (!last || last.t - lastError.t < 8e3) ? lastError : last;
-	(0, import_react.useEffect)(() => {
-		let alive = true;
-		async function tick() {
-			try {
-				const next = await getExtractorLog({ data: { after: serverCursor() } });
-				if (alive) mergeYtServer(next);
-			} catch {}
-		}
-		tick();
-		const ms = busy || open ? 700 : 2500;
-		const id = window.setInterval(() => void tick(), ms);
-		return () => {
-			alive = false;
-			window.clearInterval(id);
-		};
-	}, [busy, open]);
+	useYtLogPoll(busy || open);
 	(0, import_react.useEffect)(() => {
 		if (lastError && Date.now() - lastError.t < 15e3) setOpen(true);
 	}, [lastError?.id]);
-	(0, import_react.useEffect)(() => {
-		if (!open) return;
-		const el = scroller.current;
-		if (!el) return;
-		el.scrollTop = el.scrollHeight;
-	}, [
-		open,
-		lines.length,
-		last?.id
-	]);
 	async function onClear() {
 		clearYtLogLocal();
 		try {
@@ -558,7 +576,7 @@ function YtConsole({ busy = false }) {
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 						id: "octava-console-status",
 						"aria-live": "polite",
-						className: cn("min-w-0 flex-1 truncate font-mono text-xs", status?.level === "error" ? "text-danger" : status?.level === "warn" ? "text-muted" : "text-muted"),
+						className: cn("min-w-0 flex-1 truncate font-mono text-xs", status?.level === "error" ? "text-danger" : "text-muted"),
 						children: statusText
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ChevronDown, { className: cn("size-4 shrink-0 text-subtle transition-transform duration-[var(--motion-quick)]", open && "rotate-180") })
@@ -588,30 +606,65 @@ function YtConsole({ busy = false }) {
 					onClick: () => void onCopy(),
 					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Copy, { className: "size-4" }), "Копировать"]
 				})]
-			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-				id: "octava-console-log",
-				ref: scroller,
-				role: "log",
-				className: "max-h-48 overflow-auto rounded-md bg-raised px-3 py-2 font-mono text-xs leading-relaxed",
-				children: lines.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-					className: "text-subtle",
-					children: "Здесь stderr yt-dlp: ошибки, предупреждения и ход загрузки."
-				}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", {
-					className: "space-y-1",
-					children: lines.map((line) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", {
-						className: "flex gap-2",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-							className: cn("w-8 shrink-0 uppercase", line.level === "error" ? "text-danger" : line.level === "ok" ? "text-accent" : line.level === "warn" ? "text-muted" : "text-subtle"),
-							children: LEVEL_LABEL[line.level]
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-							className: cn("min-w-0 whitespace-pre-wrap break-all", line.level === "error" ? "text-danger" : "text-fg"),
-							children: line.text
-						})]
-					}, `${line.id}-${line.t}`))
-				})
-			})]
+			}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(YtLogPane, { id: "octava-console-log" })]
 		}) : null]
 	});
+}
+function YtLogPane({ id, className }) {
+	const lines = (0, import_react.useSyncExternalStore)(subscribeYtLog, getYtLines, getYtLines);
+	const scroller = (0, import_react.useRef)(null);
+	const last = lines[lines.length - 1];
+	(0, import_react.useEffect)(() => {
+		const el = scroller.current;
+		if (!el) return;
+		el.scrollTop = el.scrollHeight;
+	}, [
+		lines.length,
+		last?.id,
+		last?.text
+	]);
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+		id,
+		ref: scroller,
+		role: "log",
+		className: cn("max-h-40 overflow-auto rounded-md bg-raised px-3 py-2 font-mono text-xs leading-relaxed", className),
+		children: lines.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+			className: "text-subtle",
+			children: "Здесь stderr yt-dlp: ошибки, предупреждения и ход загрузки."
+		}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("ul", {
+			className: "space-y-1",
+			children: lines.map((line) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("li", {
+				className: "flex gap-2",
+				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+					className: cn("w-8 shrink-0 uppercase", line.level === "error" ? "text-danger" : line.level === "ok" ? "text-accent" : line.level === "warn" ? "text-muted" : "text-subtle"),
+					children: LEVEL_LABEL[line.level]
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+					className: cn("min-w-0 whitespace-pre-wrap break-all", line.level === "error" ? "text-danger" : "text-fg"),
+					children: line.text
+				})]
+			}, `${line.id}-${line.t}`))
+		})
+	});
+}
+function useYtLogPoll(active = false) {
+	(0, import_react.useEffect)(() => {
+		let alive = true;
+		async function tick() {
+			try {
+				const next = await getExtractorLog({ data: { after: serverCursor() } });
+				if (!alive) return;
+				mergeYtServer(next?.lines);
+				setYtDownloadRatio(next?.progress);
+			} catch {}
+		}
+		tick();
+		const ms = active ? 400 : 2500;
+		const id = window.setInterval(() => void tick(), ms);
+		return () => {
+			alive = false;
+			window.clearInterval(id);
+		};
+	}, [active]);
 }
 var blobs = /* @__PURE__ */ new Map();
 var urls = /* @__PURE__ */ new Map();
@@ -676,12 +729,17 @@ async function fetchAudioBlob(id, format, onProgress, cookies, quality = "192", 
 	const chunks = [];
 	let received = 0;
 	for (;;) {
+		if (signal?.aborted) {
+			await reader.cancel().catch(() => void 0);
+			throw new DOMException("Aborted", "AbortError");
+		}
 		const { done, value } = await reader.read();
 		if (done) break;
 		if (value) {
 			chunks.push(value);
 			received += value.byteLength;
 			if (total > 0) onProgress?.(Math.min(received / total, .99));
+			else onProgress?.(Math.min(.9, .08 + .82 * (1 - Math.exp(-received / 12e5))));
 		}
 	}
 	const mime = res.headers.get("content-type") || "application/octet-stream";
@@ -800,6 +858,17 @@ var useLibrary = create()(persist((set, get) => ({
 		playlists: state.playlists
 	})
 }));
+var ZIP_IDLE = {
+	open: false,
+	current: "",
+	done: 0,
+	total: 0,
+	packing: false,
+	skipped: 0
+};
+function isAbortError(err) {
+	return typeof DOMException !== "undefined" && err instanceof DOMException && err.name === "AbortError" || err instanceof Error && err.name === "AbortError";
+}
 function OctavaApp() {
 	const [input, setInput] = (0, import_react.useState)("");
 	const [busy, setBusy] = (0, import_react.useState)(false);
@@ -811,14 +880,10 @@ function OctavaApp() {
 	const [newPlOpen, setNewPlOpen] = (0, import_react.useState)(false);
 	const [newPlName, setNewPlName] = (0, import_react.useState)("");
 	const [pendingAdd, setPendingAdd] = (0, import_react.useState)(null);
-	const [zip, setZip] = (0, import_react.useState)({
-		open: false,
-		current: "",
-		done: 0,
-		total: 0,
-		packing: false
-	});
+	const [zip, setZip] = (0, import_react.useState)(ZIP_IDLE);
+	const zipAbort = (0, import_react.useRef)(null);
 	const [progress, setProgress] = (0, import_react.useState)({});
+	const [fetchingId, setFetchingId] = (0, import_react.useState)(null);
 	const [ready, setReady] = (0, import_react.useState)({});
 	const [cookies, setCookies] = (0, import_react.useState)("");
 	const [cookieCount, setCookieCount] = (0, import_react.useState)(0);
@@ -856,6 +921,7 @@ function OctavaApp() {
 			cookieCount: 0
 		}));
 	}, []);
+	const ytRatio = (0, import_react.useSyncExternalStore)(subscribeYtLog, getYtDownloadRatio, getYtDownloadRatio);
 	const inboxTracks = (0, import_react.useMemo)(() => {
 		if (!result) return [];
 		if (result.kind === "video") return [result.track];
@@ -918,9 +984,11 @@ function OctavaApp() {
 		setPlaying(true);
 	}
 	async function downloadOne(track) {
+		setFetchingId(track.id);
+		resetYtDownloadRatio();
 		setProgress((p) => ({
 			...p,
-			[track.id]: .02
+			[track.id]: .03
 		}));
 		noteYt("info", `скачивание «${track.title}»`);
 		try {
@@ -944,6 +1012,7 @@ function OctavaApp() {
 			if (err instanceof DownloadError) ingestYtText(err.log, "error");
 			toast.error(message);
 		} finally {
+			setFetchingId(null);
 			setProgress((p) => {
 				const next = { ...p };
 				delete next[track.id];
@@ -951,30 +1020,58 @@ function OctavaApp() {
 			});
 		}
 	}
+	function cancelZip() {
+		zipAbort.current?.abort();
+		noteYt("warn", "отмена");
+	}
 	async function packSelected() {
 		const tracks = selectedVisible;
 		if (tracks.length === 0) {
 			toast.message("Отметьте хотя бы один трек");
 			return;
 		}
+		if (zipAbort.current) return;
+		const ac = new AbortController();
+		zipAbort.current = ac;
 		setZip({
 			open: true,
 			current: "",
 			done: 0,
 			total: tracks.length,
-			packing: false
+			packing: false,
+			skipped: 0
 		});
 		const ok = [];
+		let skipped = 0;
+		let cancelled = false;
 		for (let i = 0; i < tracks.length; i++) {
+			if (ac.signal.aborted) {
+				cancelled = true;
+				break;
+			}
 			const track = tracks[i];
+			setFetchingId(track.id);
+			resetYtDownloadRatio();
+			setProgress((p) => ({
+				...p,
+				[track.id]: .03
+			}));
 			setZip((z) => ({
 				...z,
 				current: track.title,
-				done: i,
 				packing: false
 			}));
 			if (hasBlob(track.id, format, mp3Quality) || ready[blobKey(track.id, format, mp3Quality)]) {
 				ok.push(track);
+				setZip((z) => ({
+					...z,
+					done: i + 1
+				}));
+				setProgress((p) => {
+					const next = { ...p };
+					delete next[track.id];
+					return next;
+				});
 				continue;
 			}
 			try {
@@ -983,24 +1080,57 @@ function OctavaApp() {
 						...p,
 						[track.id]: ratio
 					}));
-				}, cookiePayload(cookies), mp3Quality);
+				}, cookiePayload(cookies), mp3Quality, ac.signal);
 				setReady((r) => ({
 					...r,
 					[blobKey(track.id, format, mp3Quality)]: true
 				}));
 				ok.push(track);
 			} catch (err) {
+				if (ac.signal.aborted || isAbortError(err)) {
+					cancelled = true;
+					noteYt("warn", `остановлено на «${track.title}»`);
+					break;
+				}
+				skipped += 1;
 				const message = err instanceof Error ? err.message : "не скачался";
 				noteYt("error", `${track.title}: ${message}`);
+				noteYt("warn", `пропуск «${track.title}», следующий`);
 				if (err instanceof DownloadError) ingestYtText(err.log, "error");
-				toast.error(`${track.title}: ${message}`);
+				setZip((z) => ({
+					...z,
+					skipped: z.skipped + 1
+				}));
+			} finally {
+				setFetchingId(null);
+				if (!cancelled) setZip((z) => ({
+					...z,
+					done: i + 1
+				}));
+				setProgress((p) => {
+					const next = { ...p };
+					delete next[track.id];
+					return next;
+				});
 			}
+		}
+		setFetchingId(null);
+		if (cancelled) {
+			zipAbort.current = null;
+			toast.message("Отменено");
+			setZip(ZIP_IDLE);
+			return;
+		}
+		if (ok.length === 0) {
+			zipAbort.current = null;
+			toast.error(skipped > 0 ? `Не удалось скачать выбранные треки (${skipped})` : "В архив не попало ни одного файла");
+			setZip(ZIP_IDLE);
+			return;
 		}
 		setZip((z) => ({
 			...z,
 			packing: true,
-			current: "Упаковка ZIP",
-			done: ok.length
+			current: "Упаковка ZIP"
 		}));
 		try {
 			const packed = await packTracksZip(ok, format, (done, total, title) => {
@@ -1008,7 +1138,8 @@ function OctavaApp() {
 					...z,
 					done,
 					total,
-					current: title || "Упаковка ZIP"
+					current: title || "Упаковка ZIP",
+					packing: true
 				}));
 			}, mp3Quality);
 			if (packed.packed === 0) toast.error("В архив не попало ни одного файла");
@@ -1016,18 +1147,14 @@ function OctavaApp() {
 				const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
 				const name = result?.kind === "playlist" ? safeFilename(result.title) : "octava";
 				saveBlob(packed.blob, `${name}-${stamp}.zip`);
-				toast.success(`ZIP: ${packed.packed} файл(ов)`);
+				const skipN = skipped + packed.skipped.length;
+				toast.success(skipN > 0 ? `ZIP: ${packed.packed} файл(ов), пропуск ${skipN}` : `ZIP: ${packed.packed} файл(ов)`);
 			}
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : "Не удалось собрать ZIP");
 		} finally {
-			setZip({
-				open: false,
-				current: "",
-				done: 0,
-				total: 0,
-				packing: false
-			});
+			zipAbort.current = null;
+			setZip(ZIP_IDLE);
 		}
 	}
 	function submitNewPlaylist() {
@@ -1221,7 +1348,7 @@ function OctavaApp() {
 									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Button, {
 										variant: "sage",
 										size: "sm",
-										disabled: selectedVisible.length === 0,
+										disabled: selectedVisible.length === 0 || zip.open,
 										onClick: () => void packSelected(),
 										children: [
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Archive, { className: "size-4" }),
@@ -1232,6 +1359,47 @@ function OctavaApp() {
 								]
 							})]
 						}),
+						zip.open ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							id: "octava-job",
+							className: "mt-4 rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+									className: "flex items-start justify-between gap-3",
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "min-w-0 flex-1",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+											className: "text-sm font-medium",
+											children: zip.packing ? "Собираем архив" : "Качаем треки"
+										}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+											className: "mt-0.5 truncate text-xs text-muted",
+											children: zip.current || "…"
+										})]
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Button, {
+										id: "octava-job-cancel",
+										type: "button",
+										variant: "secondary",
+										size: "sm",
+										onClick: cancelZip,
+										children: "Отмена"
+									})]
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Progress, {
+									id: "octava-zip-progress",
+									className: "mt-3",
+									value: !zip.total ? 3 : zip.packing || !fetchingId && zip.done >= zip.total ? 100 : Math.min(99, Math.round((zip.done + (fetchingId ? Math.max(ytRatio, .03) * .95 : 0)) / zip.total * 100))
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+									className: "mt-2 font-mono text-xs tabular-nums text-muted",
+									children: [
+										zip.done,
+										" / ",
+										zip.total,
+										zip.skipped > 0 ? ` · пропуск ${zip.skipped}` : "",
+										!zip.packing && fetchingId ? ` · ${Math.round(Math.max(ytRatio, progress[fetchingId] ?? 0) * 100)}%` : ""
+									]
+								})
+							]
+						}) : null,
 						visibleTracks.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmptyState, {}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "mt-6",
 							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
@@ -1252,7 +1420,7 @@ function OctavaApp() {
 									track,
 									checked: selectedIds.includes(track.id),
 									onCheck: () => toggleSelected(track.id),
-									progress: progress[track.id],
+									progress: fetchingId === track.id ? Math.max(progress[track.id] ?? .03, ytRatio) : progress[track.id],
 									saved: Boolean(ready[blobKey(track.id, format, mp3Quality)] || hasBlob(track.id, format, mp3Quality)),
 									isPlaying: nowPlaying?.id === track.id && playing,
 									onPlay: () => playTrack(track),
@@ -1334,25 +1502,6 @@ function OctavaApp() {
 						})
 					]
 				})] })
-			}),
-			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Dialog, {
-				open: zip.open,
-				onOpenChange: () => void 0,
-				children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(DialogContent, { children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(DialogHeader, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(DialogTitle, { children: zip.packing ? "Собираем архив" : "Качаем треки" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(DialogDescription, {
-						className: "truncate",
-						children: zip.current || "…"
-					})] }),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Progress, { value: zip.total ? Math.round(zip.done / zip.total * 100) : 8 }),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-						className: "mt-2 font-mono text-xs tabular-nums text-muted",
-						children: [
-							zip.done,
-							" / ",
-							zip.total
-						]
-					})
-				] })
 			})
 		]
 	});

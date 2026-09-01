@@ -98,6 +98,8 @@ function baseArgs(cookieFile?: string | null): string[] {
     "node",
     "--no-check-certificates",
     "--newline",
+    "--extractor-args",
+    "youtube:player_client=web_safari,web,web_embedded,-tv_downgraded",
   ];
   const file = cookieFile === undefined ? cookiesPath() : cookieFile;
   if (file) args.push("--cookies", file);
@@ -241,6 +243,22 @@ function mapExecError(err: unknown): ExtractorError {
     mapped = new ExtractorError(
       "BOTCHECK",
       "YouTube просит подтвердить, что вы не бот. Вставьте cookies YouTube в поле на главной — после согласия.",
+      stderr,
+    );
+  } else if (
+    /please reload|reload this page|reload the page|needs to be reloaded|page needs to be reload/i.test(
+      blob,
+    )
+  ) {
+    mapped = new ExtractorError(
+      "SESSION",
+      "YouTube сбросил сессию cookies. Экспортируйте свежий cookies.txt на youtube.com и загрузите его снова.",
+      stderr,
+    );
+  } else if (/ffmpeg exited with code -?11|signal 11|SIGSEGV/i.test(blob)) {
+    mapped = new ExtractorError(
+      "FFMPEG",
+      "ffmpeg не смог перекодировать этот файл. Попробуйте формат M4A или «как есть».",
       stderr,
     );
   } else if (/HTTP Error 403|403: Forbidden/i.test(blob)) {
@@ -409,7 +427,13 @@ function formatArgs(format: AudioFormat, quality: Mp3Quality): string[] {
     ];
   }
   if (format === "m4a") {
-    return ["-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--audio-quality", "0"];
+    return [
+      "-f",
+      "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best",
+      "-x",
+      "--audio-format",
+      "m4a",
+    ];
   }
   return ["-f", "bestaudio[ext=m4a]/bestaudio/best"];
 }

@@ -1,3 +1,5 @@
+import { normalizeCookieFile } from "./cookie-file";
+
 const CONSENT_KEY = "octava-yt-cookies-consent";
 const COOKIES_KEY = "octava-yt-cookies";
 
@@ -29,8 +31,17 @@ export function loadStoredCookies(): string {
 export function saveStoredCookies(raw: string): void {
   try {
     const text = raw.trim();
-    if (text) localStorage.setItem(COOKIES_KEY, text);
-    else localStorage.removeItem(COOKIES_KEY);
+    if (!text) {
+      localStorage.removeItem(COOKIES_KEY);
+      return;
+    }
+    let stored = text;
+    try {
+      stored = normalizeCookieFile(text);
+    } catch {
+      /* keep raw if it isn't a full netscape dump */
+    }
+    localStorage.setItem(COOKIES_KEY, stored);
   } catch {
     /* ignore */
   }
@@ -45,8 +56,11 @@ export function clearStoredCookies(): void {
 }
 
 export function cookiePayload(field: string): string | undefined {
-  const fromField = field.trim();
-  if (fromField) return fromField;
-  const stored = loadStoredCookies().trim();
-  return stored || undefined;
+  const raw = (field.trim() || loadStoredCookies()).trim();
+  if (!raw) return undefined;
+  try {
+    return normalizeCookieFile(raw);
+  } catch {
+    return raw;
+  }
 }

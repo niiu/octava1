@@ -61,12 +61,20 @@ export async function fetchAudioBlob(
   const chunks: Uint8Array[] = [];
   let received = 0;
   for (;;) {
+    if (signal?.aborted) {
+      await reader.cancel().catch(() => undefined);
+      throw new DOMException("Aborted", "AbortError");
+    }
     const { done, value } = await reader.read();
     if (done) break;
     if (value) {
       chunks.push(value);
       received += value.byteLength;
-      if (total > 0) onProgress?.(Math.min(received / total, 0.99));
+      if (total > 0) {
+        onProgress?.(Math.min(received / total, 0.99));
+      } else {
+        onProgress?.(Math.min(0.9, 0.08 + 0.82 * (1 - Math.exp(-received / 1_200_000))));
+      }
     }
   }
   const mime = res.headers.get("content-type") || "application/octet-stream";

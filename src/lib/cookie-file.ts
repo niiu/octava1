@@ -59,7 +59,7 @@ export function normalizeCookieFile(raw: string): string {
       throw new Error("В файле нет cookie-записей");
     }
     const body = cookies.map(toNetscapeLine).join("\n");
-    return `${NETSCAPE_HEADER}${body}\n`;
+    return slimNetscape(`${NETSCAPE_HEADER}${body}\n`);
   }
   if (netscapeRowCount(text) === 0) {
     throw new Error(
@@ -67,9 +67,11 @@ export function normalizeCookieFile(raw: string): string {
     );
   }
   if (/#\s*(Netscape )?HTTP Cookie File/i.test(text)) {
-    return text.endsWith("\n") ? text : `${text}\n`;
+    return slimNetscape(text.endsWith("\n") ? text : `${text}\n`);
   }
-  return `${NETSCAPE_HEADER}${text}${text.endsWith("\n") ? "" : "\n"}`;
+  return slimNetscape(
+    `${NETSCAPE_HEADER}${text}${text.endsWith("\n") ? "" : "\n"}`,
+  );
 }
 
 function stripBom(raw: string): string {
@@ -95,6 +97,65 @@ function isNetscapeRow(line: string): boolean {
   const payload = t.startsWith("#HttpOnly_") ? t.slice("#HttpOnly_".length) : t;
   if (payload.startsWith("#")) return false;
   return payload.split("\t").length >= 7;
+}
+
+const AUTH_COOKIE_NAMES = new Set([
+  "SID",
+  "HSID",
+  "SSID",
+  "APISID",
+  "SAPISID",
+  "SIDCC",
+  "LOGIN_INFO",
+  "PREF",
+  "YSC",
+  "CONSENT",
+  "SOCS",
+  "VISITOR_INFO1_LIVE",
+  "VISITOR_PRIVACY_METADATA",
+  "__Secure-1PSID",
+  "__Secure-3PSID",
+  "__Secure-1PAPISID",
+  "__Secure-3PAPISID",
+  "__Secure-1PSIDTS",
+  "__Secure-3PSIDTS",
+  "__Secure-1PSIDCC",
+  "__Secure-3PSIDCC",
+  "__Secure-YENID",
+  "__Secure-YNID",
+  "__Secure-BUCKET",
+  "__Secure-ROLLOUT_TOKEN",
+]);
+
+function keepYoutubeCookie(name: string, value: string): boolean {
+  if (!name || name.startsWith("ST-")) return false;
+  if (value.length > 12_000) return false;
+  if (AUTH_COOKIE_NAMES.has(name)) return true;
+  return name.startsWith("__Secure-") && /PSID|PAPISID|YNID|YENID/.test(name);
+}
+
+function slimNetscape(raw: string): string {
+  const kept: string[] = ["# Netscape HTTP Cookie File"];
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    const httpOnly = t.startsWith("#HttpOnly_");
+    const payload = httpOnly ? t.slice("#HttpOnly_".length) : t;
+    if (payload.startsWith("#")) continue;
+    const parts = payload.split("\t");
+    if (parts.length < 7) continue;
+    const name = parts[5] ?? "";
+    const value = parts.slice(6).join("\t");
+    if (!keepYoutubeCookie(name, value)) continue;
+    const row = `${parts[0]}\t${parts[1]}\t${parts[2]}\t${parts[3]}\t${parts[4]}\t${name}\t${value}`;
+    kept.push(httpOnly ? `#HttpOnly_${row}` : row);
+  }
+  if (kept.length === 1) {
+    throw new Error(
+      "В файле нет cookies входа на YouTube (SID / LOGIN_INFO). Экспортируйте cookies.txt, будучи авторизованы.",
+    );
+  }
+  return `${kept.join("\n")}\n`;
 }
 
 function jsonCookies(text: string): JsonCookie[] {

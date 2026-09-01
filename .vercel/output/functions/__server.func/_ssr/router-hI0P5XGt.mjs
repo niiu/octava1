@@ -1,5 +1,5 @@
 import { i as __toESM } from "../_runtime.mjs";
-import { E as streamAudioFile, S as parseMp3Quality, d as errorResponse, m as extractAudio } from "./extractor.server-DFsUbsnn.mjs";
+import { C as parseMp3Quality, D as streamAudioFile, d as errorResponse, m as extractAudio } from "./extractor.server-CqGYxN9G.mjs";
 import { u as require_react } from "../_libs/@floating-ui/react-dom+[...].mjs";
 import { f as createRouter, g as createRootRoute, h as createFileRoute, l as Scripts, m as lazyRouteComponent, p as Outlet, u as HeadContent, v as useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { m as require_jsx_runtime } from "../_libs/@radix-ui/react-checkbox+[...].mjs";
@@ -9,7 +9,7 @@ import { n as Portal, r as Provider, t as Content2 } from "../_libs/@radix-ui/re
 import { n as clsx } from "../_libs/class-variance-authority+clsx.mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
 import { t as Toaster } from "../_libs/sonner.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-GyBrEjAi.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-hI0P5XGt.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var __defProp = Object.defineProperty;
@@ -22,12 +22,13 @@ var __exportAll = (all, no_symbols) => {
 	if (!no_symbols) __defProp(target, Symbol.toStringTag, { value: "Module" });
 	return target;
 };
-function AppErrorComponent({ error }) {
+function AppErrorComponent({ error, reset }) {
+	const message = error instanceof Error && error.message.trim() ? error.message : "Неожиданная ошибка. Вернитесь на главную и попробуйте снова.";
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("main", {
-		className: "flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50",
+		className: "flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg px-6 text-center text-fg",
 		children: [
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-				className: "text-red-500",
+				className: "text-danger",
 				"aria-hidden": "true",
 				children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(TriangleAlert, {
 					className: "size-10",
@@ -35,12 +36,21 @@ function AppErrorComponent({ error }) {
 				})
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", {
-				className: "text-lg font-semibold",
-				children: "Something went wrong"
+				className: "font-display text-xl tracking-tight",
+				children: "Что-то сломалось"
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-				className: "max-w-md text-sm break-words text-zinc-500 dark:text-zinc-400",
-				children: error.message || "An unexpected error occurred. Try reloading the page."
+				className: "max-w-md text-sm break-words text-muted",
+				children: message
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "mt-2 h-10 rounded-md bg-fg px-4 text-sm text-bg",
+				onClick: () => {
+					if (typeof reset === "function") reset();
+					else window.location.assign("/");
+				},
+				children: "На главную"
 			})
 		]
 	});
@@ -299,7 +309,7 @@ var TooltipContent = import_react.forwardRef(({ className, sideOffset = 6, ...pr
 	...props
 }) }));
 TooltipContent.displayName = Content2.displayName;
-var styles_default = "/assets/styles-B78zPtGN.css";
+var styles_default = "/assets/styles-B54ypt2X.css";
 var APP_NAME = "Octava";
 var Route$3 = createRootRoute({
 	head: () => ({
@@ -377,9 +387,9 @@ function RootDocument() {
 		})]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./routes-DV4yNOGn.mjs");
+var $$splitComponentImporter$1 = () => import("./routes-B3UU2P2T.mjs");
 var Route$2 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$1, "component") });
-var $$splitComponentImporter = () => import("./install-uvFUugIq.mjs");
+var $$splitComponentImporter = () => import("./install-DPnaCryn.mjs");
 var Route$1 = createFileRoute("/install")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
 var FORMATS = /* @__PURE__ */ new Set([
 	"m4a",

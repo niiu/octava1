@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   Archive,
@@ -35,7 +35,7 @@ import { DownloadError, fetchAudioBlob } from "@/lib/download-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
-import { ingestYtText, noteYt } from "@/lib/yt-log-client";
+import { ingestYtText, noteYt, getYtDownloadRatio, resetYtDownloadRatio, subscribeYtLog } from "@/lib/yt-log-client";
 import type { AudioFormat, ExtractorCaps, Mp3Quality, ResolveResult, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
@@ -58,7 +58,24 @@ type ZipPhase = {
   done: number;
   total: number;
   packing: boolean;
+  skipped: number;
 };
+
+const ZIP_IDLE: ZipPhase = {
+  open: false,
+  current: "",
+  done: 0,
+  total: 0,
+  packing: false,
+  skipped: 0,
+};
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (typeof DOMException !== "undefined" && err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
+}
 
 export function OctavaApp() {
   const [input, setInput] = useState("");
@@ -73,14 +90,10 @@ export function OctavaApp() {
   const [newPlOpen, setNewPlOpen] = useState(false);
   const [newPlName, setNewPlName] = useState("");
   const [pendingAdd, setPendingAdd] = useState<string[] | null>(null);
-  const [zip, setZip] = useState<ZipPhase>({
-    open: false,
-    current: "",
-    done: 0,
-    total: 0,
-    packing: false,
-  });
+  const [zip, setZip] = useState<ZipPhase>(ZIP_IDLE);
+  const zipAbort = useRef<AbortController | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({});
+  const [fetchingId, setFetchingId] = useState<string | null>(null);
   const [ready, setReady] = useState<Record<string, boolean>>({});
   const [cookies, setCookies] = useState("");
   const [cookieCount, setCookieCount] = useState(0);
@@ -125,6 +138,8 @@ export function OctavaApp() {
         }),
       );
   }, []);
+
+  const ytRatio = useSyncExternalStore(subscribeYtLog, getYtDownloadRatio, getYtDownloadRatio);
 
   const inboxTracks = useMemo(() => {
     if (!result) return [];
@@ -190,7 +205,9 @@ export function OctavaApp() {
   }
 
   async function downloadOne(track: Track) {
-    setProgress((p) => ({ ...p, [track.id]: 0.02 }));
+    setFetchingId(track.id);
+    resetYtDownloadRatio();
+    setProgress((p) => ({ ...p, [track.id]: 0.03 }));
     noteYt("info", `скачивание «${track.title}»`);
     try {
       const blob = await fetchAudioBlob(track.id, format, (ratio) => {
@@ -207,6 +224,7 @@ export function OctavaApp() {
       if (err instanceof DownloadError) ingestYtText(err.log, "error");
       toast.error(message);
     } finally {
+      setFetchingId(null);
       setProgress((p) => {
         const next = { ...p };
         delete next[track.id];
@@ -215,38 +233,113 @@ export function OctavaApp() {
     }
   }
 
+  function cancelZip() {
+    zipAbort.current?.abort();
+    noteYt("warn", "отмена");
+  }
+
   async function packSelected() {
     const tracks = selectedVisible;
     if (tracks.length === 0) {
       toast.message("Отметьте хотя бы один трек");
       return;
     }
-    setZip({ open: true, current: "", done: 0, total: tracks.length, packing: false });
+    if (zipAbort.current) return;
+    const ac = new AbortController();
+    zipAbort.current = ac;
+    setZip({
+      open: true,
+      current: "",
+      done: 0,
+      total: tracks.length,
+      packing: false,
+      skipped: 0,
+    });
     const ok: Track[] = [];
+    let skipped = 0;
+    let cancelled = false;
     for (let i = 0; i < tracks.length; i++) {
+      if (ac.signal.aborted) {
+        cancelled = true;
+        break;
+      }
       const track = tracks[i]!;
-      setZip((z) => ({ ...z, current: track.title, done: i, packing: false }));
+      setFetchingId(track.id);
+      resetYtDownloadRatio();
+      setProgress((p) => ({ ...p, [track.id]: 0.03 }));
+      setZip((z) => ({ ...z, current: track.title, packing: false }));
       if (hasBlob(track.id, format, mp3Quality) || ready[blobKey(track.id, format, mp3Quality)]) {
         ok.push(track);
+        setZip((z) => ({ ...z, done: i + 1 }));
+        setProgress((p) => {
+          const next = { ...p };
+          delete next[track.id];
+          return next;
+        });
         continue;
       }
       try {
-        await fetchAudioBlob(track.id, format, (ratio) => {
-          setProgress((p) => ({ ...p, [track.id]: ratio }));
-        }, cookiePayload(cookies), mp3Quality);
+        await fetchAudioBlob(
+          track.id,
+          format,
+          (ratio) => {
+            setProgress((p) => ({ ...p, [track.id]: ratio }));
+          },
+          cookiePayload(cookies),
+          mp3Quality,
+          ac.signal,
+        );
         setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
         ok.push(track);
       } catch (err) {
+        if (ac.signal.aborted || isAbortError(err)) {
+          cancelled = true;
+          noteYt("warn", `остановлено на «${track.title}»`);
+          break;
+        }
+        skipped += 1;
         const message = err instanceof Error ? err.message : "не скачался";
         noteYt("error", `${track.title}: ${message}`);
+        noteYt("warn", `пропуск «${track.title}», следующий`);
         if (err instanceof DownloadError) ingestYtText(err.log, "error");
-        toast.error(`${track.title}: ${message}`);
+        setZip((z) => ({ ...z, skipped: z.skipped + 1 }));
+      } finally {
+        setFetchingId(null);
+        if (!cancelled) setZip((z) => ({ ...z, done: i + 1 }));
+        setProgress((p) => {
+          const next = { ...p };
+          delete next[track.id];
+          return next;
+        });
       }
     }
-    setZip((z) => ({ ...z, packing: true, current: "Упаковка ZIP", done: ok.length }));
+    setFetchingId(null);
+    if (cancelled) {
+      zipAbort.current = null;
+      toast.message("Отменено");
+      setZip(ZIP_IDLE);
+      return;
+    }
+    if (ok.length === 0) {
+      zipAbort.current = null;
+      toast.error(
+        skipped > 0
+          ? `Не удалось скачать выбранные треки (${skipped})`
+          : "В архив не попало ни одного файла",
+      );
+      setZip(ZIP_IDLE);
+      return;
+    }
+    setZip((z) => ({ ...z, packing: true, current: "Упаковка ZIP" }));
     try {
       const packed = await packTracksZip(ok, format, (done, total, title) => {
-        setZip((z) => ({ ...z, done, total, current: title || "Упаковка ZIP" }));
+        setZip((z) => ({
+          ...z,
+          done,
+          total,
+          current: title || "Упаковка ZIP",
+          packing: true,
+        }));
       }, mp3Quality);
       if (packed.packed === 0) {
         toast.error("В архив не попало ни одного файла");
@@ -257,12 +350,18 @@ export function OctavaApp() {
             ? safeFilename(result.title)
             : "octava";
         saveBlob(packed.blob, `${name}-${stamp}.zip`);
-        toast.success(`ZIP: ${packed.packed} файл(ов)`);
+        const skipN = skipped + packed.skipped.length;
+        toast.success(
+          skipN > 0
+            ? `ZIP: ${packed.packed} файл(ов), пропуск ${skipN}`
+            : `ZIP: ${packed.packed} файл(ов)`,
+        );
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Не удалось собрать ZIP");
     } finally {
-      setZip({ open: false, current: "", done: 0, total: 0, packing: false });
+      zipAbort.current = null;
+      setZip(ZIP_IDLE);
     }
   }
 
@@ -460,7 +559,7 @@ export function OctavaApp() {
               <Button
                 variant="sage"
                 size="sm"
-                disabled={selectedVisible.length === 0}
+                disabled={selectedVisible.length === 0 || zip.open}
                 onClick={() => void packSelected()}
               >
                 <Archive className="size-4" />
@@ -468,6 +567,57 @@ export function OctavaApp() {
               </Button>
             </div>
           </div>
+
+          {zip.open ? (
+            <div
+              id="octava-job"
+              className="mt-4 rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">
+                    {zip.packing ? "Собираем архив" : "Качаем треки"}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-muted">{zip.current || "…"}</p>
+                </div>
+                <Button
+                  id="octava-job-cancel"
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={cancelZip}
+                >
+                  Отмена
+                </Button>
+              </div>
+              <Progress
+                id="octava-zip-progress"
+                className="mt-3"
+                value={
+                  !zip.total
+                    ? 3
+                    : zip.packing || (!fetchingId && zip.done >= zip.total)
+                      ? 100
+                      : Math.min(
+                          99,
+                          Math.round(
+                            ((zip.done +
+                              (fetchingId ? Math.max(ytRatio, 0.03) * 0.95 : 0)) /
+                              zip.total) *
+                              100,
+                          ),
+                        )
+                }
+              />
+              <p className="mt-2 font-mono text-xs tabular-nums text-muted">
+                {zip.done} / {zip.total}
+                {zip.skipped > 0 ? ` · пропуск ${zip.skipped}` : ""}
+                {!zip.packing && fetchingId
+                  ? ` · ${Math.round(Math.max(ytRatio, progress[fetchingId] ?? 0) * 100)}%`
+                  : ""}
+              </p>
+            </div>
+          ) : null}
 
           {visibleTracks.length === 0 ? (
             <EmptyState />
@@ -502,7 +652,11 @@ export function OctavaApp() {
                   track={track}
                   checked={selectedIds.includes(track.id)}
                   onCheck={() => toggleSelected(track.id)}
-                  progress={progress[track.id]}
+                  progress={
+                    fetchingId === track.id
+                      ? Math.max(progress[track.id] ?? 0.03, ytRatio)
+                      : progress[track.id]
+                  }
                   saved={Boolean(
                     ready[blobKey(track.id, format, mp3Quality)] ||
                       hasBlob(track.id, format, mp3Quality),
@@ -602,21 +756,6 @@ export function OctavaApp() {
             ) : null}
             <Button type="submit">Создать</Button>
           </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={zip.open} onOpenChange={() => undefined}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{zip.packing ? "Собираем архив" : "Качаем треки"}</DialogTitle>
-            <DialogDescription className="truncate">{zip.current || "…"}</DialogDescription>
-          </DialogHeader>
-          <Progress
-            value={zip.total ? Math.round((zip.done / zip.total) * 100) : 8}
-          />
-          <p className="mt-2 font-mono text-xs tabular-nums text-muted">
-            {zip.done} / {zip.total}
-          </p>
         </DialogContent>
       </Dialog>
     </div>

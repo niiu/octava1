@@ -5,7 +5,7 @@ import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { promisify } from "node:util";
-//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-DFsUbsnn.js
+//#region node_modules/.nitro/vite/services/ssr/assets/extractor.server-CqGYxN9G.js
 var MP3_QUALITIES = [
 	"320",
 	"192",
@@ -200,11 +200,11 @@ function normalizeCookieFile(raw) {
 	if (looksLikeJson(text)) {
 		const cookies = jsonCookies(text);
 		if (cookies.length === 0) throw new Error("В файле нет cookie-записей");
-		return `${NETSCAPE_HEADER}${cookies.map(toNetscapeLine).join("\n")}\n`;
+		return slimNetscape(`${NETSCAPE_HEADER}${cookies.map(toNetscapeLine).join("\n")}\n`);
 	}
 	if (netscapeRowCount(text) === 0) throw new Error("Не похоже на cookies.txt. Вставьте Netscape-файл или JSON экспорта.");
-	if (/#\s*(Netscape )?HTTP Cookie File/i.test(text)) return text.endsWith("\n") ? text : `${text}\n`;
-	return `${NETSCAPE_HEADER}${text}${text.endsWith("\n") ? "" : "\n"}`;
+	if (/#\s*(Netscape )?HTTP Cookie File/i.test(text)) return slimNetscape(text.endsWith("\n") ? text : `${text}\n`);
+	return slimNetscape(`${NETSCAPE_HEADER}${text}${text.endsWith("\n") ? "" : "\n"}`);
 }
 function stripBom(raw) {
 	return raw.replace(/^\uFEFF/, "");
@@ -224,6 +224,58 @@ function isNetscapeRow(line) {
 	const payload = t.startsWith("#HttpOnly_") ? t.slice(10) : t;
 	if (payload.startsWith("#")) return false;
 	return payload.split("	").length >= 7;
+}
+var AUTH_COOKIE_NAMES = /* @__PURE__ */ new Set([
+	"SID",
+	"HSID",
+	"SSID",
+	"APISID",
+	"SAPISID",
+	"SIDCC",
+	"LOGIN_INFO",
+	"PREF",
+	"YSC",
+	"CONSENT",
+	"SOCS",
+	"VISITOR_INFO1_LIVE",
+	"VISITOR_PRIVACY_METADATA",
+	"__Secure-1PSID",
+	"__Secure-3PSID",
+	"__Secure-1PAPISID",
+	"__Secure-3PAPISID",
+	"__Secure-1PSIDTS",
+	"__Secure-3PSIDTS",
+	"__Secure-1PSIDCC",
+	"__Secure-3PSIDCC",
+	"__Secure-YENID",
+	"__Secure-YNID",
+	"__Secure-BUCKET",
+	"__Secure-ROLLOUT_TOKEN"
+]);
+function keepYoutubeCookie(name, value) {
+	if (!name || name.startsWith("ST-")) return false;
+	if (value.length > 12e3) return false;
+	if (AUTH_COOKIE_NAMES.has(name)) return true;
+	return name.startsWith("__Secure-") && /PSID|PAPISID|YNID|YENID/.test(name);
+}
+function slimNetscape(raw) {
+	const kept = ["# Netscape HTTP Cookie File"];
+	for (const line of raw.split(/\r?\n/)) {
+		const t = line.trim();
+		if (!t) continue;
+		const httpOnly = t.startsWith("#HttpOnly_");
+		const payload = httpOnly ? t.slice(10) : t;
+		if (payload.startsWith("#")) continue;
+		const parts = payload.split("	");
+		if (parts.length < 7) continue;
+		const name = parts[5] ?? "";
+		const value = parts.slice(6).join("	");
+		if (!keepYoutubeCookie(name, value)) continue;
+		const row = `${parts[0]}\t${parts[1]}\t${parts[2]}\t${parts[3]}\t${parts[4]}\t${name}\t${value}`;
+		kept.push(httpOnly ? `#HttpOnly_${row}` : row);
+	}
+	if (kept.length === 1) throw new Error("В файле нет cookies входа на YouTube (SID / LOGIN_INFO). Экспортируйте cookies.txt, будучи авторизованы.");
+	return `${kept.join("\n")}\n`;
 }
 function jsonCookies(text) {
 	let parsed;
@@ -402,18 +454,62 @@ var MAX_LINES = 180;
 var MAX_LINE = 500;
 var seq = 0;
 var lines = [];
+var lastProgress = 0;
+var lastProgressBucket = -1;
+var DOWNLOAD_PCT = /\[download\]\s+(\d+(?:\.\d+)?)%/;
+var RELOAD_LINE = /please reload|reload this page|reload the page|needs to be reloaded|page needs to be reload/i;
+var BOT_LINE = /sign in to confirm|not a bot/i;
 function sanitizeLog(raw) {
-	return raw.replace(/\u001b\[[0-9;]*m/g, "").replace(/\b(SID|HSID|SSID|APISID|SAPISID|__Secure-[A-Za-z0-9_-]+|LOGIN_INFO|VISITOR_INFO1_LIVE|YSC|PREF|CONSENT|SESSION_TOKEN)=[^\s;]*/gi, "$1=***").replace(/#HttpOnly_[^\n]*/g, "#HttpOnly_***").replace(/Cookie:\s*[^\n]+/gi, "Cookie: ***").replace(/--cookies(?:-from-browser)?\s+\S+/gi, "--cookies ***");
+	return humanizeYtLog(raw.replace(/\u001b\[[0-9;]*m/g, "").replace(/\b(SID|HSID|SSID|APISID|SAPISID|__Secure-[A-Za-z0-9_-]+|LOGIN_INFO|VISITOR_INFO1_LIVE|YSC|PREF|CONSENT|SESSION_TOKEN)=[^\s;]*/gi, "$1=***").replace(/#HttpOnly_[^\n]*/g, "#HttpOnly_***").replace(/Cookie:\s*[^\n]+/gi, "Cookie: ***").replace(/--cookies(?:-from-browser)?\s+\S+/gi, "--cookies ***"));
+}
+function humanizeYtLog(raw) {
+	return raw.split(/\r?\n/).map((line) => {
+		const yt = line.match(/^(ERROR:\s*\[youtube\]\s*\S+:\s*)([\s\S]*)$/i);
+		if (yt && (BOT_LINE.test(line) || RELOAD_LINE.test(line))) {
+			const prefix = yt[1] ?? "";
+			if (BOT_LINE.test(line)) return `${prefix}YouTube просит cookies входа (проверка на бота)`;
+			return `${prefix}сессия cookies сброшена — загрузите свежий cookies.txt`;
+		}
+		if (BOT_LINE.test(line)) return "YouTube просит cookies входа (проверка на бота)";
+		if (RELOAD_LINE.test(line)) return line.replace(/The page needs to be reloaded\.?/gi, "сессия cookies сброшена").replace(/Please reload this page\.?/gi, "обновите cookies YouTube").replace(/reload the page\.?/gi, "обновите cookies YouTube");
+		return line;
+	}).join("\n");
 }
 function classify(text) {
 	if (/ERROR:/i.test(text) || /HTTP Error\s+4\d\d/i.test(text)) return "error";
 	if (/WARNING:/i.test(text) || /Deprecated Feature/i.test(text)) return "warn";
-	if (/100%|Destination:|has already been downloaded/i.test(text)) return "ok";
+	if (/Destination:|has already been downloaded/i.test(text)) return "ok";
 	return "info";
 }
-function appendLog(level, raw) {
+function getDownloadProgress() {
+	return lastProgress;
+}
+function resetProgress() {
+	lastProgress = 0;
+	lastProgressBucket = -1;
+}
+function applyDownloadProgress(text) {
+	const match = text.match(DOWNLOAD_PCT);
+	if (match) {
+		const pct = Math.max(0, Math.min(Number(match[1]) / 100, 1));
+		lastProgress = pct;
+		const bucket = Math.floor(pct * 20);
+		if (bucket === lastProgressBucket && pct < 1) return true;
+		lastProgressBucket = bucket;
+		return false;
+	}
+	if (/скачивание\s/i.test(text)) {
+		resetProgress();
+		return false;
+	}
+	if (/Destination:|ExtractAudio|has already been downloaded/i.test(text)) lastProgress = Math.max(lastProgress, .92);
+	if (/готово\s/i.test(text)) lastProgress = 1;
+	return false;
+}
+function appendLog(level, raw, opts) {
 	const text = sanitizeLog(raw).replace(/\s+/g, " ").trim().slice(0, MAX_LINE);
 	if (!text) return;
+	if (!opts?.skipProgress && applyDownloadProgress(text) && level === "info") return;
 	seq += 1;
 	lines.push({
 		id: seq,
@@ -428,7 +524,9 @@ function feedLogChunk(chunk, carry) {
 	carry.buf = parts.pop() ?? "";
 	for (const part of parts) {
 		const text = sanitizeLog(part).trim();
-		if (text) appendLog(classify(text), text);
+		if (!text) continue;
+		if (applyDownloadProgress(text) && !/ERROR:|WARNING:/i.test(text)) continue;
+		appendLog(classify(text), text, { skipProgress: true });
 	}
 }
 function flushLogCarry(carry) {
@@ -445,6 +543,7 @@ function dumpLogText(limit = 40) {
 }
 function clearLog() {
 	lines.length = 0;
+	resetProgress();
 }
 var MAX_PLAYLIST = 40;
 var JSON_TIMEOUT_MS = 45e3;
@@ -487,7 +586,9 @@ function baseArgs(cookieFile) {
 		"--js-runtimes",
 		"node",
 		"--no-check-certificates",
-		"--newline"
+		"--newline",
+		"--extractor-args",
+		"youtube:player_client=web_safari,web,web_embedded,-tv_downgraded"
 	];
 	const file = cookieFile === void 0 ? cookiesPath() : cookieFile;
 	if (file) args.push("--cookies", file);
@@ -611,6 +712,8 @@ function mapExecError(err) {
 	if (/playlist does not exist/i.test(blob)) mapped = new ExtractorError("NOT_FOUND", "Такого плейлиста нет или он закрыт.", stderr);
 	else if (/video unavailable|private video|this video is not available/i.test(blob)) mapped = new ExtractorError("UNAVAILABLE", "Ролик недоступен, удалён или скрыт.", stderr);
 	else if (/sign in to confirm|not a bot/i.test(blob)) mapped = new ExtractorError("BOTCHECK", "YouTube просит подтвердить, что вы не бот. Вставьте cookies YouTube в поле на главной — после согласия.", stderr);
+	else if (/please reload|reload this page|reload the page|needs to be reloaded|page needs to be reload/i.test(blob)) mapped = new ExtractorError("SESSION", "YouTube сбросил сессию cookies. Экспортируйте свежий cookies.txt на youtube.com и загрузите его снова.", stderr);
+	else if (/ffmpeg exited with code -?11|signal 11|SIGSEGV/i.test(blob)) mapped = new ExtractorError("FFMPEG", "ffmpeg не смог перекодировать этот файл. Попробуйте формат M4A или «как есть».", stderr);
 	else if (/HTTP Error 403|403: Forbidden/i.test(blob)) mapped = new ExtractorError("YOUTUBE_BLOCKED", "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube в поле на главной или запустите скрипт установки у себя.", stderr);
 	else if (anyErr.killed) mapped = new ExtractorError("TIMEOUT", "YouTube слишком долго отвечает. Попробуйте ещё раз.", stderr);
 	else mapped = new ExtractorError("EXTRACT", blob.split("\n").map((l) => l.trim()).find((l) => l.startsWith("ERROR:"))?.replace(/^ERROR:\s*/i, "") || "Не удалось разобрать ссылку.", stderr);
@@ -725,12 +828,10 @@ function formatArgs(format, quality) {
 	];
 	if (format === "m4a") return [
 		"-f",
-		"bestaudio/best",
+		"bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best",
 		"-x",
 		"--audio-format",
-		"m4a",
-		"--audio-quality",
-		"0"
+		"m4a"
 	];
 	return ["-f", "bestaudio[ext=m4a]/bestaudio/best"];
 }
@@ -830,4 +931,4 @@ function errorResponse(err) {
 	}, { status });
 }
 //#endregion
-export { resolveInput as C, streamAudioFile as E, parseMp3Quality as S, saveCookieFile as T, getCaps as _, blobKey as a, newId as b, cookieCountLabel as c, errorResponse as d, exportFromBrowser as f, formatDuration as g, formatBytes as h, MP3_QUALITY_LABEL as i, countCookieRows as l, extractAudio as m, FORMAT_LABEL as n, clearCookieFile as o, extensionFor as p, MP3_QUALITIES as r, clearLog as s, ExtractorError as t, dumpLogText as u, isLikelyCookieFile as v, safeFilename as w, normalizeCookieFile as x, listLog as y };
+export { parseMp3Quality as C, streamAudioFile as D, saveCookieFile as E, normalizeCookieFile as S, safeFilename as T, getCaps as _, blobKey as a, listLog as b, cookieCountLabel as c, errorResponse as d, exportFromBrowser as f, formatDuration as g, formatBytes as h, MP3_QUALITY_LABEL as i, countCookieRows as l, extractAudio as m, FORMAT_LABEL as n, clearCookieFile as o, extensionFor as p, MP3_QUALITIES as r, clearLog as s, ExtractorError as t, dumpLogText as u, getDownloadProgress as v, resolveInput as w, newId as x, isLikelyCookieFile as y };

@@ -1,7 +1,7 @@
-import { C as resolveInput, T as saveCookieFile, _ as getCaps, f as exportFromBrowser, o as clearCookieFile, s as clearLog, t as ExtractorError, u as dumpLogText, y as listLog } from "./extractor.server-DFsUbsnn.mjs";
+import { E as saveCookieFile, _ as getCaps, b as listLog, f as exportFromBrowser, o as clearCookieFile, s as clearLog, t as ExtractorError, u as dumpLogText, v as getDownloadProgress, w as resolveInput } from "./extractor.server-CqGYxN9G.mjs";
 import { a as string, i as object, n as literal, t as number } from "../_libs/zod.mjs";
 import { n as TSS_SERVER_FUNCTION, t as createServerFn } from "./ssr.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/media.functions-GmIOoxYm.js
+//#region node_modules/.nitro/vite/services/ssr/assets/media.functions-2A1ECRce.js
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
 	return Object.assign(splitImportFn, {
@@ -25,7 +25,10 @@ var getExtractorLog_createServerFn_handler = createServerRpc({
 	name: "getExtractorLog",
 	filename: "src/lib/media.functions.ts"
 }, (opts) => getExtractorLog.__executeServer(opts));
-var getExtractorLog = createServerFn({ method: "GET" }).validator(object({ after: number().int().nonnegative().optional() })).handler(getExtractorLog_createServerFn_handler, async ({ data }) => listLog(data.after ?? 0));
+var getExtractorLog = createServerFn({ method: "GET" }).validator(object({ after: number().int().nonnegative().optional() })).handler(getExtractorLog_createServerFn_handler, async ({ data }) => ({
+	lines: listLog(data.after ?? 0),
+	progress: getDownloadProgress()
+}));
 var clearExtractorLog_createServerFn_handler = createServerRpc({
 	id: "fa1365f86a87bf5ba813312150f394883694e110e7e93bd7ed294ffe3257599f",
 	name: "clearExtractorLog",
