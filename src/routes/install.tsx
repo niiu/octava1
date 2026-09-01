@@ -55,9 +55,10 @@ function InstallPage() {
             Автоустановка
           </h1>
           <p className="mt-3 max-w-xl text-muted">
-            YouTube часто режет загрузки с облачных IP. Скрипт ставит yt-dlp, проверяет
-            ffmpeg и поднимает Octava у вас как фоновую службу — production без Vite HMR.
-            Задания качаются на сервере: обрыв сети или перезагрузка вкладки их не сбрасывают.
+            YouTube часто режет загрузки с облачных IP. Скрипт ставит Node.js LTS,
+            свежий Python 3, ffmpeg, yt-dlp и поднимает Octava как фоновую службу —
+            production без Vite HMR. Задания качаются на сервере: обрыв сети или
+            перезагрузка вкладки их не сбрасывают.
           </p>
         </div>
 
@@ -75,9 +76,10 @@ function InstallPage() {
               bash install.sh
             </pre>
             <p className="mt-2 text-muted">
-              Скрипт поставит зависимости, соберёт production (готовые JS, не Vite
-              dev), скачает yt-dlp в <span className="font-mono text-fg">bin/</span>,
-              проверит ffmpeg и запустит Octava в фоне (на Ubuntu — systemd --user).
+              Скрипт поставит Node.js LTS, Python 3, ffmpeg, свежий yt-dlp, соберёт
+              production и запустит службу (на Ubuntu — systemd --user). Нужен sudo
+              для системных пакетов; если NodeSource недоступен, Node кладётся в{" "}
+              <span className="font-mono text-fg">.runtime/</span>.
             </p>
           </li>
           <li className="rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">

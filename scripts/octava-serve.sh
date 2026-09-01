@@ -4,8 +4,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-export PATH="$ROOT/node_modules/.bin:$ROOT/bin:${PATH:-/usr/bin}"
+export PATH="$ROOT/.runtime/node/bin:$ROOT/node_modules/.bin:$ROOT/bin:${PATH:-/usr/bin}"
 export YT_DLP_PATH="${YT_DLP_PATH:-$ROOT/bin/yt-dlp}"
+if [ -z "${OCTAVA_PYTHON:-}" ] && [ -x "$ROOT/.runtime/python" ]; then
+  export OCTAVA_PYTHON="$ROOT/.runtime/python"
+fi
 HOST="${OCTAVA_HOST:-0.0.0.0}"
 PORT="${OCTAVA_PORT:-8080}"
 export OCTAVA_HOST="$HOST"

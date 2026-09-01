@@ -58,8 +58,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$ROOT
-Environment=PATH=$ROOT/node_modules/.bin:$ROOT/bin:$npm_dir:/usr/bin:/bin
+Environment=PATH=$ROOT/.runtime/node/bin:$ROOT/node_modules/.bin:$ROOT/bin:$npm_dir:/usr/bin:/bin
 Environment=YT_DLP_PATH=$ROOT/bin/yt-dlp
+Environment=OCTAVA_PYTHON=$ROOT/.runtime/python
 Environment=OCTAVA_HOME=$ROOT
 Environment=OCTAVA_HOST=0.0.0.0
 Environment=OCTAVA_PORT=8080

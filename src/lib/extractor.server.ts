@@ -55,8 +55,20 @@ type YtEntry = {
 };
 
 function pythonBin(): string {
-  if (existsSync("/usr/bin/python3.11")) return "/usr/bin/python3.11";
-  if (existsSync("/usr/local/bin/python3")) return "/usr/local/bin/python3";
+  const env = process.env.OCTAVA_PYTHON;
+  if (env && existsSync(env)) return env;
+  const bundled = path.join(process.cwd(), ".runtime/python");
+  if (existsSync(bundled)) return bundled;
+  for (const candidate of [
+    "/usr/bin/python3.14",
+    "/usr/bin/python3.13",
+    "/usr/bin/python3.12",
+    "/usr/bin/python3.11",
+    "/usr/local/bin/python3",
+    "/usr/bin/python3",
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
   return "python3";
 }
 
