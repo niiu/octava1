@@ -31,7 +31,8 @@ import {
 
 const MAX_PLAYLIST = 40;
 const JSON_TIMEOUT_MS = 45_000;
-const DOWNLOAD_TIMEOUT_MS = 180_000;
+const LOCK_STALE_MS = 3 * 60_000;
+const LOCK_HEARTBEAT_MS = 15_000;
 
 type YtEntry = {
   id?: string;
@@ -131,7 +132,7 @@ async function withCookieFile<T>(
 async function runYtDlp(
   extraArgs: string[],
   cookieFile: string | null,
-  timeoutMs: number,
+  timeoutMs: number | null,
   collectStdout: boolean,
   signal?: AbortSignal,
 ): Promise<{ code: number | null; stdout: string; stderr: string; killed: boolean }> {
@@ -157,10 +158,13 @@ async function runYtDlp(
     const carryErr = { buf: "" };
     const carryOut = { buf: "" };
     let killed = false;
-    const timer = setTimeout(() => {
-      killed = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
+    const timer =
+      timeoutMs && timeoutMs > 0
+        ? setTimeout(() => {
+            killed = true;
+            child.kill("SIGKILL");
+          }, timeoutMs)
+        : null;
     const onAbort = () => {
       killed = true;
       child.kill("SIGKILL");
@@ -186,12 +190,12 @@ async function runYtDlp(
       feedLogChunk(text, carryErr);
     });
     child.on("error", (err) => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
       reject(err);
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
       flushLogCarry(carryOut);
       flushLogCarry(carryErr);
@@ -425,17 +429,21 @@ function extractChain(): { current: Promise<unknown> } {
 }
 
 async function acquireFileLock(): Promise<() => Promise<void>> {
-  for (let i = 0; i < 900; i++) {
+  for (;;) {
     try {
       await writeFile(EXTRACT_LOCK, `${process.pid}\n${Date.now()}\n`, { flag: "wx" });
+      const heartbeat = setInterval(() => {
+        void writeFile(EXTRACT_LOCK, `${process.pid}\n${Date.now()}\n`).catch(() => undefined);
+      }, LOCK_HEARTBEAT_MS);
       return async () => {
+        clearInterval(heartbeat);
         await unlink(EXTRACT_LOCK).catch(() => undefined);
       };
     } catch {
       try {
         const raw = await readFile(EXTRACT_LOCK, "utf8");
         const ts = Number((raw.split("\n")[1] ?? "").trim());
-        if (Number.isFinite(ts) && Date.now() - ts > 12 * 60 * 1000) {
+        if (Number.isFinite(ts) && Date.now() - ts > LOCK_STALE_MS) {
           await unlink(EXTRACT_LOCK).catch(() => undefined);
           continue;
         }
@@ -445,10 +453,6 @@ async function acquireFileLock(): Promise<() => Promise<void>> {
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
   }
-  throw new ExtractorError(
-    "TIMEOUT",
-    "Предыдущая загрузка не освободила очередь. Попробуйте ещё раз.",
-  );
 }
 
 async function withExtractLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -577,7 +581,8 @@ export async function extractAudio(
             watchUrl(videoId),
           ];
           try {
-            const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false, signal);
+            // no wall-clock kill: ffmpeg on a long video can take many minutes
+            const proc = await runYtDlp(args, cookieFile, null, false, signal);
             if (signal?.aborted) {
               throw new ExtractorError("CANCELLED", "Отменено.");
             }
