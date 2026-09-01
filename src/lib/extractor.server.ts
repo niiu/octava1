@@ -18,6 +18,7 @@ import {
 import { parseYoutubeInput, toYtdlpTarget } from "./youtube-url";
 import { normalizeCookieFile } from "./cookie-file";
 import { cookieStatus } from "./cookie-store.server";
+import { pythonBin } from "./python.server";
 import {
   appendLog,
   dumpLogText,
@@ -53,24 +54,6 @@ type YtEntry = {
   original_url?: string;
   extractor?: string;
 };
-
-function pythonBin(): string {
-  const env = process.env.OCTAVA_PYTHON;
-  if (env && existsSync(env)) return env;
-  const bundled = path.join(process.cwd(), ".runtime/python");
-  if (existsSync(bundled)) return bundled;
-  for (const candidate of [
-    "/usr/bin/python3.14",
-    "/usr/bin/python3.13",
-    "/usr/bin/python3.12",
-    "/usr/bin/python3.11",
-    "/usr/local/bin/python3",
-    "/usr/bin/python3",
-  ]) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return "python3";
-}
 
 function ytDlpPath(): string | null {
   const candidates = [

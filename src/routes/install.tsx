@@ -56,7 +56,7 @@ function InstallPage() {
           </h1>
           <p className="mt-3 max-w-xl text-muted">
             YouTube часто режет загрузки с облачных IP. Скрипт ставит Node.js LTS,
-            свежий Python 3, ffmpeg, yt-dlp и поднимает Octava как фоновую службу —
+            свежий Python 3.11+, ffmpeg, yt-dlp и поднимает Octava как фоновую службу —
             production без Vite HMR. Задания качаются на сервере: обрыв сети или
             перезагрузка вкладки их не сбрасывают.
           </p>
@@ -76,7 +76,7 @@ function InstallPage() {
               bash install.sh
             </pre>
             <p className="mt-2 text-muted">
-              Скрипт поставит Node.js LTS, Python 3, ffmpeg, свежий yt-dlp, соберёт
+              Скрипт поставит Node.js LTS, Python 3.11+ (3.10 yt-dlp уже не берёт), ffmpeg, свежий yt-dlp, соберёт
               production и запустит службу (на Ubuntu — systemd --user). Нужен sudo
               для системных пакетов; если NodeSource недоступен, Node кладётся в{" "}
               <span className="font-mono text-fg">.runtime/</span>.

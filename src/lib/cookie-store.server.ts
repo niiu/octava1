@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { countCookieRows, normalizeCookieFile } from "./cookie-file";
+import { pythonBin } from "./python.server";
 
 const execFileAsync = promisify(execFile);
 const BROWSERS = ["chrome", "chromium", "firefox", "brave"] as const;
@@ -13,12 +14,6 @@ export type CookieStatus = {
   present: boolean;
   count: number;
 };
-
-function pythonBin(): string {
-  if (existsSync("/usr/bin/python3.11")) return "/usr/bin/python3.11";
-  if (existsSync("/usr/local/bin/python3")) return "/usr/local/bin/python3";
-  return "python3";
-}
 
 function ytDlpPath(): string | null {
   const candidates = [

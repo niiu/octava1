@@ -83,11 +83,11 @@ pick_python() {
   for c in \
     "${OCTAVA_PYTHON:-}" \
     "$RUNTIME/python" \
-    python3.14 python3.13 python3.12 python3.11 python3.10 \
+    python3.14 python3.13 python3.12 python3.11 \
     python3; do
     [ -n "$c" ] || continue
     if need_cmd "$c" || [ -x "$c" ]; then
-      if [ "$(python_minor "$c")" -ge 310 ]; then
+      if [ "$(python_minor "$c")" -ge 311 ]; then
         echo "$c"
         return
       fi
@@ -109,30 +109,32 @@ install_base() {
 }
 
 install_python() {
-  say "Python 3 (свежий 3.10+)"
+  say "Python 3.11+ (yt-dlp больше не запускается на 3.10)"
   case "$(os_family)" in
     debian)
       pkg_install python3 python3-venv python3-pip || true
       if [ "$(python_minor python3)" -lt 312 ]; then
-        echo "Пробуем более новый Python из deadsnakes…"
+        echo "Системный Python старше 3.12 — yt-dlp уже не берёт 3.10, ставим 3.12 (deadsnakes)"
         pkg_install software-properties-common || true
         if run_root add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null; then
           run_root apt-get update -y || true
-          pkg_install python3.13 python3.13-venv python3.13-minimal \
-            || pkg_install python3.12 python3.12-venv \
-            || true
         fi
+        pkg_install python3.13 python3.13-venv \
+          || pkg_install python3.12 python3.12-venv \
+          || pkg_install python3.11 python3.11-venv \
+          || true
       fi
       ;;
-    fedora) pkg_install python3 python3-pip || true ;;
+    fedora) pkg_install python3.12 python3.12-pip || pkg_install python3 python3-pip || true ;;
     arch) pkg_install python python-pip || true ;;
-    brew) pkg_install python || true ;;
+    brew) pkg_install python@3.12 || pkg_install python || true ;;
   esac
 
   local py
   py="$(pick_python)"
   if [ -z "$py" ]; then
-    echo "Не удалось поставить Python 3.10+. Установите python3 и повторите."
+    echo "Не удалось поставить Python 3.11+. yt-dlp отказался от 3.10."
+    echo "Ubuntu 22.04: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.12"
     exit 1
   fi
   ln -sfn "$(command -v "$py")" "$RUNTIME/python"
