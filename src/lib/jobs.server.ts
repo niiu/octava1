@@ -8,20 +8,42 @@ import {
   extractAudio,
   streamSavedFile,
 } from "./extractor.server";
-import type { AudioFormat, DownloadJob, JobStatus, Mp3Quality } from "./media";
+import type { AudioFormat, DownloadJob, Mp3Quality } from "./media";
 import { contentDisposition, DEFAULT_MP3_QUALITY, extensionFor, mimeFor, newId, safeFilename } from "./media";
 import { dumpLogText, getDownloadProgress } from "./yt-log.server";
 
 type JobInternal = DownloadJob & { filePath?: string };
 
-const jobs = new Map<string, JobInternal>();
-const cookiesByJob = new Map<string, string | undefined>();
-const controllers = new Map<string, AbortController>();
-let loaded = false;
-let persistTimer: ReturnType<typeof setTimeout> | null = null;
-let jobsDir = "";
+type JobsRt = {
+  jobs: Map<string, JobInternal>;
+  cookiesByJob: Map<string, string | undefined>;
+  controllers: Map<string, AbortController>;
+  loaded: boolean;
+  persistTimer: ReturnType<typeof setTimeout> | null;
+  jobsDir: string;
+  pumping: boolean;
+};
+
+function rt(): JobsRt {
+  const g = globalThis as typeof globalThis & { __octavaJobsRt?: JobsRt };
+  if (!g.__octavaJobsRt) {
+    g.__octavaJobsRt = {
+      jobs: new Map(),
+      cookiesByJob: new Map(),
+      controllers: new Map(),
+      loaded: false,
+      persistTimer: null,
+      jobsDir: "",
+      pumping: false,
+    };
+  }
+  return g.__octavaJobsRt;
+}
 
 const MAX_JOBS = 40;
+const jobs = rt().jobs;
+const cookiesByJob = rt().cookiesByJob;
+const controllers = rt().controllers;
 
 function publicJob(job: JobInternal): DownloadJob {
   return {
@@ -54,13 +76,13 @@ function resolveDir(): string {
 }
 
 function indexPath(): string {
-  return path.join(jobsDir, "index.json");
+  return path.join(rt().jobsDir, "index.json");
 }
 
 async function ensureLoaded(): Promise<void> {
-  if (loaded) return;
-  loaded = true;
-  jobsDir = resolveDir();
+  if (rt().loaded) return;
+  rt().loaded = true;
+  rt().jobsDir = resolveDir();
   try {
     const raw = await readFile(indexPath(), "utf8");
     const parsed = JSON.parse(raw) as { jobs?: JobInternal[] };
@@ -91,9 +113,9 @@ async function ensureLoaded(): Promise<void> {
 }
 
 function schedulePersist(): void {
-  if (persistTimer) return;
-  persistTimer = setTimeout(() => {
-    persistTimer = null;
+  if (rt().persistTimer) return;
+  rt().persistTimer = setTimeout(() => {
+    rt().persistTimer = null;
     const payload = JSON.stringify({ jobs: [...jobs.values()] });
     void writeFile(indexPath(), payload, "utf8").catch(() => undefined);
   }, 250);
@@ -148,8 +170,9 @@ async function runJob(jobId: string): Promise<void> {
   const tick = setInterval(() => {
     const current = jobs.get(jobId);
     if (!current || current.status !== "running") return;
-    patch(jobId, { progress: Math.max(current.progress, getDownloadProgress() || 0.03) });
-  }, 400);
+    const latest = Math.max(current.progress, getDownloadProgress() || 0);
+    if (latest > current.progress) patch(jobId, { progress: latest });
+  }, 350);
   try {
     const file = await extractAudio(
       job.videoId,
@@ -157,9 +180,14 @@ async function runJob(jobId: string): Promise<void> {
       cookiesByJob.get(jobId),
       job.quality,
       ac?.signal,
+      (ratio) => {
+        const current = jobs.get(jobId);
+        if (!current || current.status !== "running") return;
+        if (ratio > current.progress) patch(jobId, { progress: ratio });
+      },
     );
     const ext = path.extname(file.path) || `.${extensionFor(job.format, file.mime)}`;
-    const dest = path.join(jobsDir, `${job.jobId}${ext}`);
+    const dest = path.join(rt().jobsDir, `${job.jobId}${ext}`);
     await copyFile(file.path, dest);
     const info = await stat(dest);
     await file.cleanup().catch(() => undefined);
@@ -182,9 +210,6 @@ async function runJob(jobId: string): Promise<void> {
       status: "error",
       error: mapped?.message || (err instanceof Error ? err.message : "не скачался"),
     });
-    if (mapped?.log) {
-      /* already in extractor log */
-    }
   } finally {
     clearInterval(tick);
     cookiesByJob.delete(jobId);
@@ -240,19 +265,19 @@ export async function startJob(input: {
   return publicJob(job);
 }
 
-let pumping = false;
-
 async function pumpQueue(): Promise<void> {
-  if (pumping) return;
-  pumping = true;
+  if (rt().pumping) return;
+  rt().pumping = true;
   try {
     for (;;) {
-      const next = [...jobs.values()].find((job) => job.status === "queued");
+      const next = [...jobs.values()]
+        .filter((job) => job.status === "queued")
+        .sort((a, b) => a.createdAt - b.createdAt)[0];
       if (!next) return;
       await runJob(next.jobId);
     }
   } finally {
-    pumping = false;
+    rt().pumping = false;
     if ([...jobs.values()].some((job) => job.status === "queued")) {
       void pumpQueue();
     }

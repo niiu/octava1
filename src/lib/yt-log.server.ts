@@ -3,13 +3,36 @@ import type { YtLogLevel, YtLogLine } from "./media";
 const MAX_LINES = 180;
 const MAX_LINE = 500;
 
-let seq = 0;
-const lines: YtLogLine[] = [];
-let lastProgress = 0;
-let lastProgressBucket = -1;
-let progressEpoch = 0;
+type ProgressSink = (ratio: number) => void;
+
+type YtLogRt = {
+  seq: number;
+  lines: YtLogLine[];
+  lastProgress: number;
+  lastProgressBucket: number;
+  progressEpoch: number;
+  sink: ProgressSink | null;
+};
+
+function rt(): YtLogRt {
+  const g = globalThis as typeof globalThis & { __octavaYtLog?: YtLogRt };
+  if (!g.__octavaYtLog) {
+    g.__octavaYtLog = {
+      seq: 0,
+      lines: [],
+      lastProgress: 0,
+      lastProgressBucket: -1,
+      progressEpoch: 0,
+      sink: null,
+    };
+  }
+  return g.__octavaYtLog;
+}
 
 const DOWNLOAD_PCT = /\[download\]\s+(\d+(?:\.\d+)?)%/;
+const OCTAVA_P =
+  /\[octava-p\]\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s*(.*)$/;
+const FRAGMENT = /(?:Downloading fragment|Fragment)\s+(\d+)\s*(?:\/|of)\s*(\d+)/i;
 
 const RELOAD_LINE =
   /please reload|reload this page|reload the page|needs to be reloaded|page needs to be reload/i;
@@ -66,46 +89,98 @@ function classify(text: string): YtLogLevel {
   return "info";
 }
 
+function toNum(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const t = raw.trim();
+  if (!t || /^NA|N\/A|None|nan$/i.test(t)) return null;
+  const n = Number(t.replace(/%/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+export function parseDownloadRatio(text: string): number | null {
+  const tagged = text.match(OCTAVA_P);
+  if (tagged) {
+    const downloaded = toNum(tagged[1]);
+    const total = toNum(tagged[2]);
+    const estimate = toNum(tagged[3]);
+    const fragI = toNum(tagged[4]);
+    const fragN = toNum(tagged[5]);
+    const tail = (tagged[6] ?? "").trim();
+    const pctMatch = tail.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (pctMatch) return clamp01(Number(pctMatch[1]) / 100);
+    const pctBare = toNum(tail);
+    if (pctBare != null) return clamp01(pctBare > 1.0001 ? pctBare / 100 : pctBare);
+    if (fragI != null && fragN != null && fragN > 0) return clamp01(fragI / fragN);
+    const denom = total ?? estimate;
+    if (downloaded != null && denom != null && denom > 0) return clamp01(downloaded / denom);
+  }
+  const classic = text.match(DOWNLOAD_PCT);
+  if (classic) return clamp01(Number(classic[1]) / 100);
+  const frag = text.match(FRAGMENT);
+  if (frag) {
+    const n = Number(frag[2]);
+    if (n > 0) return clamp01(Number(frag[1]) / n);
+  }
+  return null;
+}
+
 export function getDownloadProgress(): number {
-  return lastProgress;
+  return rt().lastProgress;
 }
 
 export function getProgressEpoch(): number {
-  return progressEpoch;
+  return rt().progressEpoch;
+}
+
+export function setProgressSink(fn: ProgressSink | null): void {
+  rt().sink = fn;
 }
 
 export function resetDownloadProgress(): void {
-  lastProgress = 0;
-  lastProgressBucket = -1;
-  progressEpoch += 1;
+  const s = rt();
+  s.lastProgress = 0;
+  s.lastProgressBucket = -1;
+  s.progressEpoch += 1;
+  s.sink?.(0);
 }
 
-function resetProgress() {
-  lastProgress = 0;
-  lastProgressBucket = -1;
-  progressEpoch += 1;
+function emitProgress(ratio: number): void {
+  const s = rt();
+  const next = clamp01(ratio);
+  if (next + 0.002 < s.lastProgress && next < 0.99) return;
+  s.lastProgress = Math.max(s.lastProgress, next);
+  s.sink?.(s.lastProgress);
 }
 
 function applyDownloadProgress(text: string): boolean {
-  const match = text.match(DOWNLOAD_PCT);
-  if (match) {
-    const pct = Math.max(0, Math.min(Number(match[1]) / 100, 1));
-    lastProgress = pct;
-    const bucket = Math.floor(pct * 50);
-    if (bucket === lastProgressBucket && pct < 1) return true;
-    lastProgressBucket = bucket;
+  const parsed = parseDownloadRatio(text);
+  if (parsed != null) {
+    const s = rt();
+    const before = s.lastProgress;
+    emitProgress(parsed);
+    const bucket = Math.floor(s.lastProgress * 50);
+    if (bucket === s.lastProgressBucket && s.lastProgress < 1 && s.lastProgress === before) {
+      return true;
+    }
+    if (bucket === s.lastProgressBucket && s.lastProgress < 1) return true;
+    s.lastProgressBucket = bucket;
     return false;
   }
   if (/скачивание\s/i.test(text)) {
-    lastProgress = 0;
-    lastProgressBucket = -1;
+    emitProgress(0.03);
     return false;
   }
   if (/Destination:|ExtractAudio|has already been downloaded/i.test(text)) {
-    lastProgress = Math.max(lastProgress, 0.92);
+    emitProgress(Math.max(rt().lastProgress, 0.92));
+    return false;
   }
   if (/готово\s/i.test(text)) {
-    lastProgress = 1;
+    emitProgress(1);
   }
   return false;
 }
@@ -118,9 +193,10 @@ export function appendLog(
   const text = sanitizeLog(raw).replace(/\s+/g, " ").trim().slice(0, MAX_LINE);
   if (!text) return;
   if (!opts?.skipProgress && applyDownloadProgress(text) && level === "info") return;
-  seq += 1;
-  lines.push({ id: seq, t: Date.now(), level, text });
-  if (lines.length > MAX_LINES) lines.splice(0, lines.length - MAX_LINES);
+  const s = rt();
+  s.seq += 1;
+  s.lines.push({ id: s.seq, t: Date.now(), level, text });
+  if (s.lines.length > MAX_LINES) s.lines.splice(0, s.lines.length - MAX_LINES);
 }
 
 export function feedLogChunk(chunk: string, carry: { buf: string }): void {
@@ -142,18 +218,20 @@ export function flushLogCarry(carry: { buf: string }): void {
 }
 
 export function listLog(after = 0): YtLogLine[] {
+  const lines = rt().lines;
   if (after <= 0) return lines.slice();
   return lines.filter((line) => line.id > after);
 }
 
 export function dumpLogText(limit = 40): string {
-  return lines
-    .slice(-limit)
+  return rt()
+    .lines.slice(-limit)
     .map((line) => line.text)
     .join("\n");
 }
 
 export function clearLog(): void {
-  lines.length = 0;
-  resetProgress();
+  const s = rt();
+  s.lines.length = 0;
+  resetDownloadProgress();
 }

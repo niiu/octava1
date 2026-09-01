@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   Archive,
@@ -31,11 +31,11 @@ import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
 import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, ensureServerJob } from "@/lib/download-client";
-import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, zipDownloadUrl } from "@/lib/jobs-client";
+import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, startJob, waitForJob, zipDownloadUrl } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
-import { ingestYtText, noteYt, getYtDownloadRatio, resetYtDownloadRatio, subscribeYtLog } from "@/lib/yt-log-client";
+import { ingestYtText, noteYt, resetYtDownloadRatio } from "@/lib/yt-log-client";
 import type { AudioFormat, DownloadJob, ExtractorCaps, Mp3Quality, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
@@ -223,7 +223,14 @@ export function OctavaApp() {
     };
   }, [jobsBusy]);
 
-  const ytRatio = useSyncExternalStore(subscribeYtLog, getYtDownloadRatio, getYtDownloadRatio);
+  const activeJob =
+    runningJobs.find((j) => j.status === "running") ?? runningJobs[0] ?? null;
+  const liveRatio = Math.max(
+    0.03,
+    activeJob?.progress ?? 0,
+    activeJob ? progress[activeJob.videoId] ?? 0 : 0,
+    fetchingId ? progress[fetchingId] ?? 0 : 0,
+  );
 
   const inboxTracks = useMemo(() => {
     if (!result) return [];
@@ -388,14 +395,52 @@ export function OctavaApp() {
     const doneIds: string[] = [];
     let skipped = 0;
     let cancelled = false;
+    const ck = cookiePayload(cookies);
 
     try {
-      for (let i = 0; i < tracks.length; i++) {
+      const pending: Array<{ track: Track; jobId: string }> = [];
+      for (const track of tracks) {
         if (ac.signal.aborted) {
           cancelled = true;
           break;
         }
-        const track = tracks[i]!;
+        if (fileReady(track)) {
+          const existing = doneJobFor(track);
+          if (existing) doneIds.push(existing.jobId);
+          continue;
+        }
+        try {
+          const job = await startJob({
+            videoId: track.id,
+            title: track.title,
+            format,
+            quality: mp3Quality,
+            cookies: ck,
+          });
+          if (job.status === "done") {
+            doneIds.push(job.jobId);
+            setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
+          } else if (job.status === "error") {
+            throw new DownloadError("JOB", job.error || "не скачался");
+          } else {
+            pending.push({ track, jobId: job.jobId });
+          }
+        } catch (err) {
+          skipped += 1;
+          const message = err instanceof Error ? err.message : "не скачался";
+          noteYt("error", `${track.title}: ${message}`);
+          noteYt("warn", `пропуск «${track.title}», следующий`);
+          setZip((z) => ({ ...z, skipped: z.skipped + 1 }));
+        }
+      }
+
+      noteYt("info", `очередь: ${pending.length} файл(ов) по одному`);
+      for (let i = 0; i < pending.length; i++) {
+        if (ac.signal.aborted) {
+          cancelled = true;
+          break;
+        }
+        const { track, jobId } = pending[i]!;
         setFetchingId(track.id);
         resetYtDownloadRatio();
         setProgress((p) => ({ ...p, [track.id]: 0.03 }));
@@ -403,19 +448,15 @@ export function OctavaApp() {
           ...z,
           current: track.title,
           packing: false,
-          done: i,
+          done: doneIds.length,
         }));
         try {
-          const job = await ensureServerJob(
-            track.id,
-            format,
+          const job = await waitForJob(
+            jobId,
             (ratio) => {
               setProgress((p) => ({ ...p, [track.id]: ratio }));
             },
-            cookiePayload(cookies),
-            mp3Quality,
             ac.signal,
-            track.title,
           );
           if (job.status !== "done") {
             throw new DownloadError("JOB", job.error || "не скачался");
@@ -436,7 +477,7 @@ export function OctavaApp() {
           setZip((z) => ({ ...z, skipped: z.skipped + 1 }));
         } finally {
           setFetchingId(null);
-          if (!cancelled) setZip((z) => ({ ...z, done: i + 1 }));
+          if (!cancelled) setZip((z) => ({ ...z, done: doneIds.length }));
           setProgress((p) => {
             const next = { ...p };
             delete next[track.id];
@@ -747,22 +788,12 @@ export function OctavaApp() {
                         : Math.min(
                             99,
                             Math.round(
-                              ((zip.done +
-                                (fetchingId ? Math.max(ytRatio, 0.03) * 0.95 : 0)) /
+                              ((zip.done + (fetchingId ? liveRatio * 0.97 : 0)) /
                                 zip.total) *
                                 100,
                             ),
                           )
-                    : Math.min(
-                        99,
-                        Math.round(
-                          Math.max(
-                            ytRatio,
-                            runningJobs[0]?.progress ?? 0.03,
-                            fetchingId ? (progress[fetchingId] ?? 0.03) : 0.03,
-                          ) * 100,
-                        ),
-                      )
+                    : Math.min(99, Math.round(liveRatio * 100))
                 }
               />
               <p className="mt-2 font-mono text-xs tabular-nums text-muted">
@@ -771,20 +802,15 @@ export function OctavaApp() {
                     {zip.done} / {zip.total}
                     {zip.skipped > 0 ? ` · пропуск ${zip.skipped}` : ""}
                     {!zip.packing && fetchingId
-                      ? ` · ${Math.round(Math.max(ytRatio, progress[fetchingId] ?? 0) * 100)}%`
+                      ? ` · ${Math.round(liveRatio * 100)}%`
                       : ""}
                   </>
                 ) : (
                   <>
-                    {Math.round(
-                      Math.max(
-                        ytRatio,
-                        runningJobs[0]?.progress ?? 0.03,
-                        fetchingId ? (progress[fetchingId] ?? 0.03) : 0.03,
-                      ) * 100,
-                    )}
-                    %
-                    {runningJobs.length > 1 ? ` · ещё ${runningJobs.length - 1}` : ""}
+                    {Math.round(liveRatio * 100)}%
+                    {runningJobs.length > 1
+                      ? ` · ещё ${runningJobs.filter((j) => j.status === "queued").length} в очереди`
+                      : ""}
                   </>
                 )}
               </p>
@@ -829,9 +855,9 @@ export function OctavaApp() {
                       runningJobs.some((j) => j.videoId === track.id)) &&
                     !fileReady(track)
                       ? Math.max(
-                          progress[track.id] ?? 0.03,
+                          0.03,
+                          progress[track.id] ?? 0,
                           runningJobs.find((j) => j.videoId === track.id)?.progress ?? 0,
-                          fetchingId === track.id ? ytRatio : 0,
                         )
                       : undefined
                   }

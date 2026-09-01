@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
-import { mkdtemp, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -26,6 +26,7 @@ import {
   flushLogCarry,
   resetDownloadProgress,
   sanitizeLog,
+  setProgressSink,
 } from "./yt-log.server";
 
 const MAX_PLAYLIST = 40;
@@ -145,15 +146,16 @@ async function runYtDlp(
     throw new ExtractorError("CANCELLED", "Отменено.");
   }
   const py = pythonBin();
-  const args = [bin, ...baseArgs(cookieFile), ...extraArgs];
+  const args = ["-u", bin, ...baseArgs(cookieFile), ...extraArgs];
   return new Promise((resolve, reject) => {
     const child = spawn(py, args, {
       env: { ...process.env, PYTHONUNBUFFERED: "1" },
-      stdio: ["ignore", collectStdout ? "pipe" : "ignore", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
-    const carry = { buf: "" };
+    const carryErr = { buf: "" };
+    const carryOut = { buf: "" };
     let killed = false;
     const timer = setTimeout(() => {
       killed = true;
@@ -166,9 +168,14 @@ async function runYtDlp(
     signal?.addEventListener("abort", onAbort, { once: true });
     if (child.stdout) {
       child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8");
-        if (stdout.length > 16 * 1024 * 1024) {
-          stdout = stdout.slice(-8 * 1024 * 1024);
+        const text = chunk.toString("utf8");
+        if (collectStdout) {
+          stdout += text;
+          if (stdout.length > 16 * 1024 * 1024) {
+            stdout = stdout.slice(-8 * 1024 * 1024);
+          }
+        } else {
+          feedLogChunk(text, carryOut);
         }
       });
     }
@@ -176,7 +183,7 @@ async function runYtDlp(
       const text = chunk.toString("utf8");
       stderr += text;
       if (stderr.length > 64_000) stderr = stderr.slice(-48_000);
-      feedLogChunk(text, carry);
+      feedLogChunk(text, carryErr);
     });
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -186,7 +193,8 @@ async function runYtDlp(
     child.on("close", (code) => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      flushLogCarry(carry);
+      flushLogCarry(carryOut);
+      flushLogCarry(carryErr);
       resolve({ code, stdout, stderr, killed });
     });
   });
@@ -406,19 +414,61 @@ async function resolveVideo(videoId: string, cookieFile: string | null): Promise
   return { kind: "video", track };
 }
 
-let activeDownloads = 0;
-const waiters: Array<() => void> = [];
+const EXTRACT_LOCK = path.join(os.tmpdir(), "octava-extract.lock");
 
-async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
-  if (activeDownloads >= 1) {
-    await new Promise<void>((resolve) => waiters.push(resolve));
+function extractChain(): { current: Promise<unknown> } {
+  const g = globalThis as typeof globalThis & {
+    __octavaExtractChain?: { current: Promise<unknown> };
+  };
+  if (!g.__octavaExtractChain) g.__octavaExtractChain = { current: Promise.resolve() };
+  return g.__octavaExtractChain;
+}
+
+async function acquireFileLock(): Promise<() => Promise<void>> {
+  for (let i = 0; i < 900; i++) {
+    try {
+      await writeFile(EXTRACT_LOCK, `${process.pid}\n${Date.now()}\n`, { flag: "wx" });
+      return async () => {
+        await unlink(EXTRACT_LOCK).catch(() => undefined);
+      };
+    } catch {
+      try {
+        const raw = await readFile(EXTRACT_LOCK, "utf8");
+        const ts = Number((raw.split("\n")[1] ?? "").trim());
+        if (Number.isFinite(ts) && Date.now() - ts > 12 * 60 * 1000) {
+          await unlink(EXTRACT_LOCK).catch(() => undefined);
+          continue;
+        }
+      } catch {
+        /* retry */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
   }
-  activeDownloads += 1;
+  throw new ExtractorError(
+    "TIMEOUT",
+    "Предыдущая загрузка не освободила очередь. Попробуйте ещё раз.",
+  );
+}
+
+async function withExtractLock<T>(fn: () => Promise<T>): Promise<T> {
+  const slot = extractChain();
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const prev = slot.current;
+  slot.current = held;
   try {
-    return await fn();
+    await prev.catch(() => undefined);
+    const unlock = await acquireFileLock();
+    try {
+      return await fn();
+    } finally {
+      await unlock();
+    }
   } finally {
-    activeDownloads -= 1;
-    waiters.shift()?.();
+    release();
   }
 }
 
@@ -481,6 +531,7 @@ export async function extractAudio(
   cookiesText?: string,
   quality: Mp3Quality = DEFAULT_MP3_QUALITY,
   signal?: AbortSignal,
+  onProgress?: (ratio: number) => void,
 ): Promise<AudioFile> {
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
     throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
@@ -493,102 +544,109 @@ export async function extractAudio(
     );
   }
 
-  resetDownloadProgress();
-  appendLog(
-    "info",
-    format === "mp3"
-      ? `скачивание ${videoId} · mp3 ${quality}k`
-      : `скачивание ${videoId} · ${format}`,
-  );
-
   return withCookieFile(cookiesText, (cookieFile) =>
-    withSlot(async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
-    const outTpl = path.join(dir, "%(id)s.%(ext)s");
-    const attempts = formatAttempts(format, quality);
-    let lastFail: { code: number | null; stderr: string; killed: boolean } | null =
-      null;
-    for (let i = 0; i < attempts.length; i++) {
-      const args = [
-        ...attempts[i]!,
-        "--no-playlist",
-        "--no-part",
-        "--no-mtime",
-        "--progress",
-        "-o",
-        outTpl,
-        "--",
-        watchUrl(videoId),
-      ];
+    withExtractLock(async () => {
+      if (signal?.aborted) throw new ExtractorError("CANCELLED", "Отменено.");
+      resetDownloadProgress();
+      setProgressSink((ratio) => onProgress?.(ratio));
+      onProgress?.(0.03);
+      appendLog(
+        "info",
+        format === "mp3"
+          ? `скачивание ${videoId} · mp3 ${quality}k`
+          : `скачивание ${videoId} · ${format}`,
+      );
+      const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
+      const outTpl = path.join(dir, "%(id)s.%(ext)s");
+      const attempts = formatAttempts(format, quality);
+      let lastFail: { code: number | null; stderr: string; killed: boolean } | null =
+        null;
       try {
-        const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false, signal);
-        if (signal?.aborted) {
-          await rm(dir, { recursive: true, force: true }).catch(() => {});
-          throw new ExtractorError("CANCELLED", "Отменено.");
-        }
-        if (proc.killed) {
-          lastFail = proc;
-          break;
-        }
-        if (proc.code === 0) {
-          if (/unable to download video data|HTTP Error 403/i.test(proc.stderr)) {
+        for (let i = 0; i < attempts.length; i++) {
+          resetDownloadProgress();
+          onProgress?.(0.03);
+          const args = [
+            ...attempts[i]!,
+            "--no-playlist",
+            "--no-part",
+            "--no-mtime",
+            "--progress",
+            "-o",
+            outTpl,
+            "--",
+            watchUrl(videoId),
+          ];
+          try {
+            const proc = await runYtDlp(args, cookieFile, DOWNLOAD_TIMEOUT_MS, false, signal);
+            if (signal?.aborted) {
+              throw new ExtractorError("CANCELLED", "Отменено.");
+            }
+            if (proc.killed) {
+              lastFail = proc;
+              break;
+            }
+            if (proc.code === 0) {
+              if (/unable to download video data|HTTP Error 403/i.test(proc.stderr)) {
+                lastFail = proc;
+                break;
+              }
+              lastFail = null;
+              break;
+            }
             lastFail = proc;
+            if (i < attempts.length - 1 && isRetryableFormatError(proc.stderr)) {
+              appendLog("warn", "формат недоступен, другой вариант");
+              continue;
+            }
             break;
+          } catch (err) {
+            if (err instanceof ExtractorError) throw err;
+            throw mapExecError(err);
           }
-          lastFail = null;
-          break;
         }
-        lastFail = proc;
-        if (i < attempts.length - 1 && isRetryableFormatError(proc.stderr)) {
-          appendLog("warn", "формат недоступен, другой вариант");
-          continue;
+        if (lastFail) {
+          throw mapExecError(
+            Object.assign(new Error("yt-dlp failed"), {
+              killed: lastFail.killed,
+              code: lastFail.code,
+              stderr: lastFail.stderr,
+            }),
+          );
         }
-        break;
+
+        const files = (await readdir(dir)).filter((f) => !f.endsWith(".part"));
+        const audio = files[0];
+        if (!audio) {
+          throw new ExtractorError("EMPTY_FILE", "Файл не был сохранён.");
+        }
+        const filePath = path.join(dir, audio);
+        const info = await stat(filePath);
+        if (info.size < 4_096) {
+          throw new ExtractorError(
+            "YOUTUBE_BLOCKED",
+            "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube или запустите установщик у себя.",
+          );
+        }
+        const ext = path.extname(audio).slice(1) || (format === "mp3" ? "mp3" : "m4a");
+        const titleGuess = audio.replace(/\.[^.]+$/, "") || videoId;
+        onProgress?.(1);
+        appendLog("ok", `готово ${videoId} · ${info.size} байт`);
+        return {
+          path: filePath,
+          filename: `${safeFilename(titleGuess)}.${ext}`,
+          mime: mimeFor(format === "source" ? "source" : format),
+          cleanup: async () => {
+            await unlink(filePath).catch(() => {});
+            await rm(dir, { recursive: true, force: true }).catch(() => {});
+          },
+        };
       } catch (err) {
         await rm(dir, { recursive: true, force: true }).catch(() => {});
-        if (err instanceof ExtractorError) throw err;
-        throw mapExecError(err);
+        throw err;
+      } finally {
+        setProgressSink(null);
       }
-    }
-    if (lastFail) {
-      await rm(dir, { recursive: true, force: true }).catch(() => {});
-      throw mapExecError(
-        Object.assign(new Error("yt-dlp failed"), {
-          killed: lastFail.killed,
-          code: lastFail.code,
-          stderr: lastFail.stderr,
-        }),
-      );
-    }
-
-    const files = (await readdir(dir)).filter((f) => !f.endsWith(".part"));
-    const audio = files[0];
-    if (!audio) {
-      await rm(dir, { recursive: true, force: true }).catch(() => {});
-      throw new ExtractorError("EMPTY_FILE", "Файл не был сохранён.");
-    }
-    const filePath = path.join(dir, audio);
-    const info = await stat(filePath);
-    if (info.size < 4_096) {
-      await rm(dir, { recursive: true, force: true }).catch(() => {});
-      throw new ExtractorError(
-        "YOUTUBE_BLOCKED",
-        "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube или запустите установщик у себя.",
-      );
-    }
-    const ext = path.extname(audio).slice(1) || (format === "mp3" ? "mp3" : "m4a");
-    const titleGuess = audio.replace(/\.[^.]+$/, "") || videoId;
-    appendLog("ok", `готово ${videoId} · ${info.size} байт`);
-    return {
-      path: filePath,
-      filename: `${safeFilename(titleGuess)}.${ext}`,
-      mime: mimeFor(format === "source" ? "source" : format),
-      cleanup: async () => {
-        await unlink(filePath).catch(() => {});
-        await rm(dir, { recursive: true, force: true }).catch(() => {});
-      },
-    };
-  }),
+    }),
   );
 }
 
