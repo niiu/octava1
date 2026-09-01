@@ -7,6 +7,7 @@ import type { YtLogLevel } from "@/lib/media";
 import {
   clearYtLogLocal,
   getYtLines,
+  getYtDownloadRatio,
   serverCursor,
   subscribeYtLog,
   mergeYtServer,
@@ -27,6 +28,7 @@ const LEVEL_LABEL: Record<YtLogLevel, string> = {
 
 export function YtConsole({ busy = false }: Props) {
   const lines = useSyncExternalStore(subscribeYtLog, getYtLines, getYtLines);
+  const ratio = useSyncExternalStore(subscribeYtLog, getYtDownloadRatio, getYtDownloadRatio);
   const [open, setOpen] = useState(false);
   const lastError = [...lines].reverse().find((l) => l.level === "error");
   const last = lines[lines.length - 1];
@@ -59,8 +61,12 @@ export function YtConsole({ busy = false }: Props) {
     }
   }
 
-  const statusText =
+  const pct = Math.round(ratio * 100);
+  let statusText =
     status?.text ?? (busy ? "yt-dlp работает…" : "yt-dlp · ожидание запроса");
+  if (busy && pct > 0 && pct < 100 && !/\d+\s*%/.test(statusText)) {
+    statusText = `${statusText} · ${pct}%`;
+  }
 
   return (
     <section
@@ -210,7 +216,7 @@ export function useYtLogPoll(active = false) {
       try {
         const next = await getExtractorLog({ data: { after: serverCursor() } });
         if (!alive) return;
-        mergeYtServer(next?.lines);
+        mergeYtServer(next?.lines, next?.boot);
         setYtDownloadRatio(next?.progress, next?.epoch);
       } catch {
         /* console is best-effort */

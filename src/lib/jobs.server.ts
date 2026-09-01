@@ -12,7 +12,7 @@ import type { AudioFormat, DownloadJob, Mp3Quality } from "./media";
 import { contentDisposition, DEFAULT_MP3_QUALITY, extensionFor, mimeFor, newId, safeFilename } from "./media";
 import { dumpLogText, getDownloadProgress } from "./yt-log.server";
 
-type JobInternal = DownloadJob & { filePath?: string };
+type JobInternal = DownloadJob & { filePath?: string; duration?: number | null };
 
 type JobsRt = {
   jobs: Map<string, JobInternal>;
@@ -185,6 +185,7 @@ async function runJob(jobId: string): Promise<void> {
         if (!current || current.status !== "running") return;
         if (ratio > current.progress) patch(jobId, { progress: ratio });
       },
+      { title: job.title, duration: job.duration },
     );
     const ext = path.extname(file.path) || `.${extensionFor(job.format, file.mime)}`;
     const dest = path.join(rt().jobsDir, `${job.jobId}${ext}`);
@@ -237,6 +238,7 @@ export async function startJob(input: {
   format: AudioFormat;
   quality?: Mp3Quality;
   cookies?: string;
+  duration?: number | null;
 }): Promise<DownloadJob> {
   await ensureLoaded();
   const quality = input.quality ?? DEFAULT_MP3_QUALITY;
@@ -253,6 +255,7 @@ export async function startJob(input: {
     quality,
     status: "queued",
     progress: 0,
+    duration: input.duration ?? null,
     createdAt: now,
     updatedAt: now,
   };

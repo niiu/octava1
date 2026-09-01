@@ -13,6 +13,7 @@ export async function ensureServerJob(
   quality: Mp3Quality = DEFAULT_MP3_QUALITY,
   signal?: AbortSignal,
   title?: string,
+  duration?: number | null,
 ): Promise<DownloadJob> {
   const cached = getBlob(id, format, quality);
   if (cached && cached.size >= 4_096) {
@@ -25,6 +26,7 @@ export async function ensureServerJob(
     format,
     quality,
     cookies,
+    duration,
   });
   onProgress?.(Math.max(0.03, started.progress));
   if (started.status === "done" || started.status === "error") return started;

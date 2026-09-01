@@ -6,7 +6,7 @@ import {
   exportFromBrowser,
   saveCookieFile,
 } from "./cookie-store.server";
-import { clearLog, dumpLogText, getDownloadProgress, getProgressEpoch, listLog } from "./yt-log.server";
+import { clearLog, dumpLogText, getDownloadProgress, getLogBoot, getProgressEpoch, listLog } from "./yt-log.server";
 
 const inputSchema = z.object({
   input: z.string().trim().min(1, "Вставьте ссылку или запрос").max(500),
@@ -23,6 +23,7 @@ export const getExtractorLog = createServerFn({ method: "POST" })
     lines: listLog(data.after ?? 0),
     progress: getDownloadProgress(),
     epoch: getProgressEpoch(),
+    boot: getLogBoot(),
   }));
 
 export const clearExtractorLog = createServerFn({ method: "POST" }).handler(

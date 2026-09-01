@@ -311,6 +311,7 @@ export function OctavaApp() {
         mp3Quality,
         undefined,
         track.title,
+        track.duration,
       );
       if (job.status !== "done") {
         throw new DownloadError("JOB", job.error || "Не удалось скачать");
@@ -416,6 +417,7 @@ export function OctavaApp() {
             format,
             quality: mp3Quality,
             cookies: ck,
+            duration: track.duration,
           });
           if (job.status === "done") {
             doneIds.push(job.jobId);
@@ -441,6 +443,7 @@ export function OctavaApp() {
           break;
         }
         const { track, jobId } = pending[i]!;
+        noteYt("info", `${i + 1}/${pending.length} · «${track.title}»`);
         setFetchingId(track.id);
         resetYtDownloadRatio();
         setProgress((p) => ({ ...p, [track.id]: 0.03 }));

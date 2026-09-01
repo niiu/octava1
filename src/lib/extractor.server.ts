@@ -21,6 +21,7 @@ import { cookieStatus } from "./cookie-store.server";
 import { pythonBin } from "./python.server";
 import {
   appendLog,
+  beginExtractLog,
   dumpLogText,
   feedLogChunk,
   flushLogCarry,
@@ -536,6 +537,7 @@ export async function extractAudio(
   quality: Mp3Quality = DEFAULT_MP3_QUALITY,
   signal?: AbortSignal,
   onProgress?: (ratio: number) => void,
+  meta?: { title?: string; duration?: number | null },
 ): Promise<AudioFile> {
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
     throw new ExtractorError("BAD_ID", "Некорректный идентификатор ролика.");
@@ -551,15 +553,16 @@ export async function extractAudio(
   return withCookieFile(cookiesText, (cookieFile) =>
     withExtractLock(async () => {
       if (signal?.aborted) throw new ExtractorError("CANCELLED", "Отменено.");
-      resetDownloadProgress();
       setProgressSink((ratio) => onProgress?.(ratio));
+      beginExtractLog({
+        videoId,
+        title: meta?.title,
+        format,
+        quality,
+        duration: meta?.duration,
+        encode: format === "mp3" || format === "m4a",
+      });
       onProgress?.(0.03);
-      appendLog(
-        "info",
-        format === "mp3"
-          ? `скачивание ${videoId} · mp3 ${quality}k`
-          : `скачивание ${videoId} · ${format}`,
-      );
       const dir = await mkdtemp(path.join(os.tmpdir(), "octava-"));
       const outTpl = path.join(dir, "%(id)s.%(ext)s");
       const attempts = formatAttempts(format, quality);
@@ -567,14 +570,23 @@ export async function extractAudio(
         null;
       try {
         for (let i = 0; i < attempts.length; i++) {
-          resetDownloadProgress();
-          onProgress?.(0.03);
+          if (i > 0) {
+            resetDownloadProgress();
+            onProgress?.(0.03);
+          }
           const args = [
             ...attempts[i]!,
             "--no-playlist",
             "--no-part",
             "--no-mtime",
             "--progress",
+            "--print",
+            "before_dl:duration:%(duration)s",
+            "--print",
+            "before_dl:title:%(title)s",
+            ...(format === "mp3" || format === "m4a"
+              ? ["--postprocessor-args", "ExtractAudio:-nostats -progress pipe:2"]
+              : []),
             "-o",
             outTpl,
             "--",

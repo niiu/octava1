@@ -43,6 +43,7 @@ export const Route = createFileRoute("/api/job")({
             format?: unknown;
             quality?: unknown;
             cookies?: unknown;
+            duration?: unknown;
           };
           const videoId =
             typeof body.videoId === "string"
@@ -62,6 +63,7 @@ export const Route = createFileRoute("/api/job")({
             format: parseFormat(body.format),
             quality: parseMp3Quality(body.quality),
             cookies: typeof body.cookies === "string" ? body.cookies : undefined,
+            duration: typeof body.duration === "number" && Number.isFinite(body.duration) ? body.duration : null,
           });
           return Response.json({ job });
         } catch (err) {

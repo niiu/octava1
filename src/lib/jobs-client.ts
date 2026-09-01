@@ -26,6 +26,7 @@ export async function startJob(input: {
   format: AudioFormat;
   quality?: Mp3Quality;
   cookies?: string;
+  duration?: number | null;
 }): Promise<DownloadJob> {
   const res = await fetch("/api/job", {
     method: "POST",
@@ -37,6 +38,7 @@ export async function startJob(input: {
       format: input.format,
       quality: input.format === "mp3" ? input.quality ?? DEFAULT_MP3_QUALITY : undefined,
       cookies: input.cookies?.trim() ? input.cookies : undefined,
+      duration: input.duration ?? undefined,
     }),
   });
   const body = await readJson(res);
