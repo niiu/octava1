@@ -31,7 +31,7 @@ import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
 import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, ensureServerJob } from "@/lib/download-client";
-import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, startJob, zipDownloadUrl } from "@/lib/jobs-client";
+import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, zipDownloadUrl } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
@@ -385,73 +385,64 @@ export function OctavaApp() {
       skipped: 0,
     });
 
-    const queued: { track: Track; jobId: string }[] = [];
+    const doneIds: string[] = [];
     let skipped = 0;
     let cancelled = false;
 
     try {
-      for (const track of tracks) {
+      for (let i = 0; i < tracks.length; i++) {
         if (ac.signal.aborted) {
           cancelled = true;
           break;
         }
-        setZip((z) => ({ ...z, current: track.title }));
+        const track = tracks[i]!;
+        setFetchingId(track.id);
+        resetYtDownloadRatio();
+        setProgress((p) => ({ ...p, [track.id]: 0.03 }));
+        setZip((z) => ({
+          ...z,
+          current: track.title,
+          packing: false,
+          done: i,
+        }));
         try {
-          const job = await startJob({
-            videoId: track.id,
-            title: track.title,
+          const job = await ensureServerJob(
+            track.id,
             format,
-            quality: mp3Quality,
-            cookies: cookiePayload(cookies),
-          });
-          queued.push({ track, jobId: job.jobId });
-          if (job.status === "done") {
-            setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
+            (ratio) => {
+              setProgress((p) => ({ ...p, [track.id]: ratio }));
+            },
+            cookiePayload(cookies),
+            mp3Quality,
+            ac.signal,
+            track.title,
+          );
+          if (job.status !== "done") {
+            throw new DownloadError("JOB", job.error || "не скачался");
           }
+          doneIds.push(job.jobId);
+          setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
         } catch (err) {
+          if (ac.signal.aborted || isAbortError(err)) {
+            cancelled = true;
+            noteYt("warn", `остановлено на «${track.title}»`);
+            break;
+          }
           skipped += 1;
           const message = err instanceof Error ? err.message : "не скачался";
           noteYt("error", `${track.title}: ${message}`);
           noteYt("warn", `пропуск «${track.title}», следующий`);
-          setZip((z) => ({ ...z, skipped: z.skipped + 1, done: z.done + 1 }));
+          if (err instanceof DownloadError) ingestYtText(err.log, "error");
+          setZip((z) => ({ ...z, skipped: z.skipped + 1 }));
+        } finally {
+          setFetchingId(null);
+          if (!cancelled) setZip((z) => ({ ...z, done: i + 1 }));
+          setProgress((p) => {
+            const next = { ...p };
+            delete next[track.id];
+            return next;
+          });
         }
-      }
-
-      while (!cancelled && !ac.signal.aborted) {
-        const live = await listJobs();
-        const mine = queued
-          .map((item) => live.find((j) => j.jobId === item.jobId))
-          .filter((j): j is DownloadJob => Boolean(j));
-        const running = mine.filter((j) => j.status === "queued" || j.status === "running");
-        const done = mine.filter((j) => j.status === "done");
-        const failed = mine.filter((j) => j.status === "error" || j.status === "cancelled");
-        for (const job of done) {
-          setReady((r) => ({ ...r, [blobKey(job.videoId, job.format, job.quality)]: true }));
-        }
-        setZip((z) => ({
-          ...z,
-          done: done.length + failed.length + skipped,
-          skipped: skipped + failed.length,
-          current: running[0]?.title || "Упаковка ZIP",
-          packing: running.length === 0,
-        }));
-        const current = running[0];
-        setFetchingId(current?.videoId ?? null);
-        if (current) {
-          setProgress((p) => ({ ...p, [current.videoId]: Math.max(0.03, current.progress) }));
-        }
-        if (running.length === 0) break;
-        await new Promise<void>((resolve, reject) => {
-          const timer = window.setTimeout(resolve, 400);
-          ac.signal.addEventListener(
-            "abort",
-            () => {
-              window.clearTimeout(timer);
-              reject(new DOMException("Aborted", "AbortError"));
-            },
-            { once: true },
-          );
-        });
       }
     } catch (err) {
       if (isAbortError(err) || ac.signal.aborted) cancelled = true;
@@ -465,13 +456,6 @@ export function OctavaApp() {
       setZip(ZIP_IDLE);
       return;
     }
-
-    const live = await listJobs().catch(() => serverJobs);
-    const doneIds = queued
-      .map((item) => live.find((j) => j.jobId === item.jobId))
-      .filter((j): j is DownloadJob => j?.status === "done")
-      .map((j) => j.jobId);
-    skipped += queued.length - doneIds.length;
 
     if (doneIds.length === 0) {
       zipAbort.current = null;

@@ -410,7 +410,7 @@ let activeDownloads = 0;
 const waiters: Array<() => void> = [];
 
 async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
-  if (activeDownloads >= 2) {
+  if (activeDownloads >= 1) {
     await new Promise<void>((resolve) => waiters.push(resolve));
   }
   activeDownloads += 1;

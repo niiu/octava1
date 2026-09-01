@@ -236,8 +236,27 @@ export async function startJob(input: {
   const ac = new AbortController();
   controllers.set(jobId, ac);
   schedulePersist();
-  void runJob(jobId);
+  void pumpQueue();
   return publicJob(job);
+}
+
+let pumping = false;
+
+async function pumpQueue(): Promise<void> {
+  if (pumping) return;
+  pumping = true;
+  try {
+    for (;;) {
+      const next = [...jobs.values()].find((job) => job.status === "queued");
+      if (!next) return;
+      await runJob(next.jobId);
+    }
+  } finally {
+    pumping = false;
+    if ([...jobs.values()].some((job) => job.status === "queued")) {
+      void pumpQueue();
+    }
+  }
 }
 
 export async function cancelJob(jobId: string): Promise<DownloadJob | null> {
