@@ -225,7 +225,14 @@ async function runJson(args: string[], cookieFile?: string | null): Promise<YtEn
     if (!trimmed) {
       throw new ExtractorError("EMPTY", "YouTube вернул пустой ответ.", proc.stderr);
     }
-    return JSON.parse(trimmed) as YtEntry;
+    try {
+      const start = trimmed.indexOf("{");
+      const end = trimmed.lastIndexOf("}");
+      const json = start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+      return JSON.parse(json) as YtEntry;
+    } catch {
+      throw new ExtractorError("EXTRACT", "Не удалось разобрать ответ YouTube.", proc.stderr);
+    }
   } catch (err) {
     if (err instanceof ExtractorError) throw err;
     throw mapExecError(err);
@@ -295,8 +302,10 @@ function mapExecError(err: unknown): ExtractorError {
     );
   } else if (anyErr.killed) {
     mapped = new ExtractorError(
-      "TIMEOUT",
-      "YouTube слишком долго отвечает. Попробуйте ещё раз.",
+      /timeout/i.test(anyErr.message ?? "") ? "TIMEOUT" : "CANCELLED",
+      /timeout/i.test(anyErr.message ?? "")
+        ? "YouTube слишком долго отвечает. Попробуйте ещё раз."
+        : "Скачивание прервано.",
       stderr,
     );
   } else if (/aborted|cancelled/i.test(blob)) {
@@ -530,6 +539,24 @@ function isRetryableFormatError(stderr: string): boolean {
   return /requested format is not available/i.test(stderr);
 }
 
+function preferredExts(format: AudioFormat): string[] {
+  if (format === "mp3") return [".mp3"];
+  if (format === "m4a") return [".m4a", ".mp4", ".aac"];
+  return [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".aac"];
+}
+
+function pickAudioName(files: string[], format: AudioFormat): string | undefined {
+  const audioExt = new Set([".mp3", ".m4a", ".mp4", ".webm", ".opus", ".ogg", ".aac", ".wav", ".flac"]);
+  const audio = files.filter((name) => audioExt.has(path.extname(name).toLowerCase()));
+  const pool = audio.length > 0 ? audio : files;
+  const pref = preferredExts(format);
+  return [...pool].sort((a, b) => {
+    const ia = pref.indexOf(path.extname(a).toLowerCase());
+    const ib = pref.indexOf(path.extname(b).toLowerCase());
+    return (ia === -1 ? 50 : ia) - (ib === -1 ? 50 : ib);
+  })[0];
+}
+
 export async function extractAudio(
   videoId: string,
   format: AudioFormat,
@@ -577,8 +604,22 @@ export async function extractAudio(
           const args = [
             ...attempts[i]!,
             "--no-playlist",
-            "--no-part",
+            "--continue",
             "--no-mtime",
+            "--retries",
+            "20",
+            "--fragment-retries",
+            "20",
+            "--file-access-retries",
+            "10",
+            "--retry-sleep",
+            "http:linear=1:8:2",
+            "--retry-sleep",
+            "fragment:linear=1:6:2",
+            "--socket-timeout",
+            "30",
+            "--concurrent-fragments",
+            "1",
             "--progress",
             "--print",
             "before_dl:duration:%(duration)s",
@@ -631,8 +672,10 @@ export async function extractAudio(
           );
         }
 
-        const files = (await readdir(dir)).filter((f) => !f.endsWith(".part"));
-        const audio = files[0];
+        const files = (await readdir(dir)).filter(
+          (f) => !f.endsWith(".part") && !f.endsWith(".ytdl"),
+        );
+        const audio = pickAudioName(files, format);
         if (!audio) {
           throw new ExtractorError("EMPTY_FILE", "Файл не был сохранён.");
         }

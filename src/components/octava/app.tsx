@@ -405,9 +405,9 @@ export function OctavaApp() {
           cancelled = true;
           break;
         }
-        if (fileReady(track)) {
-          const existing = doneJobFor(track);
-          if (existing) doneIds.push(existing.jobId);
+        const existing = doneJobFor(track);
+        if (existing) {
+          doneIds.push(existing.jobId);
           continue;
         }
         try {

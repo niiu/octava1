@@ -265,6 +265,7 @@ function maybeLogPct(kind: "загрузка" | "кодирование", phaseR
   const now = Date.now();
   const sameKind = s.lastConsoleKind === kind;
   if (sameKind && pct === s.lastConsolePct) return;
+  if (sameKind && pct + 3 < s.lastConsolePct && pct < 95) return;
   const jumped = !sameKind || Math.abs(pct - s.lastConsolePct) >= 5;
   const aged = now - s.lastConsoleAt >= 1500;
   if (pct < 100 && !jumped && !aged) return;
@@ -327,6 +328,18 @@ function applyDownloadProgress(text: string): boolean {
   if (/готово\s/i.test(text)) {
     emitProgress(1);
     return false;
+  }
+  if (
+    /retrying|Retrying fragment|Connection reset|timed out|Read timed out|Temporary failure in name resolution|Unable to download video data/i.test(
+      text,
+    )
+  ) {
+    const s = rt();
+    if (Date.now() - s.lastConsoleAt > 4000) {
+      s.lastConsoleAt = Date.now();
+      pushLine("warn", `${who()} · обрыв сети, докачиваем с того же места`);
+    }
+    return true;
   }
   return false;
 }

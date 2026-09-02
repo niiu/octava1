@@ -88,6 +88,7 @@ async function ensureLoaded(): Promise<void> {
     const parsed = JSON.parse(raw) as { jobs?: JobInternal[] };
     for (const job of parsed.jobs ?? []) {
       if (!job?.jobId) continue;
+      if (!job.quality) job.quality = DEFAULT_MP3_QUALITY;
       if (job.status === "queued" || job.status === "running") {
         if (job.filePath && existsSync(job.filePath)) {
           const info = await stat(job.filePath).catch(() => null);
@@ -103,6 +104,10 @@ async function ensureLoaded(): Promise<void> {
           job.status = "error";
           job.error = "прервано при перезапуске службы — нажмите скачать снова";
         }
+        job.updatedAt = Date.now();
+      } else if (job.status === "done" && (!job.filePath || !existsSync(job.filePath))) {
+        job.status = "error";
+        job.error = "файл пропал после перезапуска — скачайте снова";
         job.updatedAt = Date.now();
       }
       jobs.set(job.jobId, job);
@@ -243,7 +248,13 @@ export async function startJob(input: {
   await ensureLoaded();
   const quality = input.quality ?? DEFAULT_MP3_QUALITY;
   const existing = findReusable(input.videoId, input.format, quality);
-  if (existing) return publicJob(existing);
+  if (existing) {
+    if (input.cookies?.trim() && existing.status === "queued") {
+      cookiesByJob.set(existing.jobId, input.cookies);
+    }
+    if (input.duration && !existing.duration) existing.duration = input.duration;
+    return publicJob(existing);
+  }
 
   const jobId = newId("job");
   const now = Date.now();
@@ -293,8 +304,9 @@ export async function cancelJob(jobId: string): Promise<DownloadJob | null> {
   if (!job) return null;
   if (job.status === "done") return publicJob(job);
   controllers.get(jobId)?.abort();
-  patch(jobId, { status: "cancelled", error: "отменено" });
+  controllers.delete(jobId);
   cookiesByJob.delete(jobId);
+  patch(jobId, { status: "cancelled", error: "отменено" });
   return publicJob(jobs.get(jobId)!);
 }
 
