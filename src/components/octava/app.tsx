@@ -32,7 +32,7 @@ import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
 import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, ensureServerJob } from "@/lib/download-client";
-import { cancelJob, fetchJobFile, fetchJobsZip, jobDownloadUrl, listJobs, startBrowserDownload, startJob, waitForJob } from "@/lib/jobs-client";
+import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, startJob, waitForJob } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
@@ -49,7 +49,7 @@ import {
   safeFilename,
   extensionFor,
 } from "@/lib/media";
-import { saveBlob } from "@/lib/pack-zip";
+import { packTracksZip, saveBlob } from "@/lib/pack-zip";
 import { useLibrary } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
@@ -432,7 +432,7 @@ export function OctavaApp() {
       skipped: 0,
     });
 
-    const doneIds: string[] = [];
+    const readyJobs: DownloadJob[] = [];
     let skipped = 0;
     let cancelled = false;
     const ck = cookiePayload(cookies);
@@ -446,7 +446,7 @@ export function OctavaApp() {
         }
         const existing = doneJobFor(track);
         if (existing) {
-          doneIds.push(existing.jobId);
+          readyJobs.push(existing);
           continue;
         }
         try {
@@ -459,7 +459,7 @@ export function OctavaApp() {
             duration: track.duration,
           });
           if (job.status === "done") {
-            doneIds.push(job.jobId);
+            readyJobs.push(job);
             setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
           } else if (job.status === "error") {
             throw new DownloadError("JOB", job.error || "не скачался");
@@ -475,7 +475,9 @@ export function OctavaApp() {
         }
       }
 
-      noteYt("info", `очередь: ${pending.length} файл(ов) по одному`);
+      if (pending.length > 0) {
+        noteYt("info", `очередь: ${pending.length} файл(ов) по одному`);
+      }
       for (let i = 0; i < pending.length; i++) {
         if (ac.signal.aborted) {
           cancelled = true;
@@ -490,7 +492,7 @@ export function OctavaApp() {
           ...z,
           current: track.title,
           packing: false,
-          done: doneIds.length,
+          done: readyJobs.length,
         }));
         try {
           const job = await waitForJob(
@@ -503,7 +505,7 @@ export function OctavaApp() {
           if (job.status !== "done") {
             throw new DownloadError("JOB", job.error || "не скачался");
           }
-          doneIds.push(job.jobId);
+          readyJobs.push(job);
           setReady((r) => ({ ...r, [blobKey(track.id, format, mp3Quality)]: true }));
         } catch (err) {
           if (ac.signal.aborted || isAbortError(err)) {
@@ -519,7 +521,7 @@ export function OctavaApp() {
           setZip((z) => ({ ...z, skipped: z.skipped + 1 }));
         } finally {
           setFetchingId(null);
-          if (!cancelled) setZip((z) => ({ ...z, done: doneIds.length }));
+          if (!cancelled) setZip((z) => ({ ...z, done: readyJobs.length }));
           setProgress((p) => {
             const next = { ...p };
             delete next[track.id];
@@ -540,7 +542,7 @@ export function OctavaApp() {
       return;
     }
 
-    if (doneIds.length === 0) {
+    if (readyJobs.length === 0) {
       zipAbort.current = null;
       toast.error(
         skipped > 0
@@ -551,35 +553,63 @@ export function OctavaApp() {
       return;
     }
 
-    setZip((z) => ({ ...z, packing: true, current: "Упаковка ZIP", done: doneIds.length }));
+    setZip((z) => ({ ...z, packing: true, current: "Сборка архива", done: 0, total: readyJobs.length }));
     const stamp = new Date().toISOString().slice(0, 10);
-    const name =
+    const collection =
       result?.kind === "playlist"
-        ? safeFilename(result.title)
-        : playlists.find((p) => p.id === activePlaylistId)?.name
-          ? safeFilename(playlists.find((p) => p.id === activePlaylistId)!.name)
-          : "octava";
+        ? result.title
+        : playlists.find((p) => p.id === activePlaylistId)?.name;
+    const name = safeFilename(collection || "octava");
     const zipName = `${name}-${stamp}.zip`;
     try {
-      const blob = await fetchJobsZip(doneIds, `${name}-${stamp}`, ac.signal);
-      if (ac.signal.aborted) {
-        toast.message("Отменено");
-        setZip(ZIP_IDLE);
-        zipAbort.current = null;
-        return;
+      for (let i = 0; i < readyJobs.length; i++) {
+        if (ac.signal.aborted) throw new DOMException("Aborted", "AbortError");
+        const job = readyJobs[i]!;
+        setZip((z) => ({
+          ...z,
+          packing: true,
+          current: job.title,
+          done: i,
+          total: readyJobs.length,
+        }));
+        noteYt("info", `в архив ${i + 1}/${readyJobs.length} · «${job.title}»`);
+        if (!getBlob(job.videoId, job.format, job.quality)) {
+          await fetchJobFile(job, job.quality);
+        }
       }
-      saveBlob(blob, zipName);
-      noteYt("ok", `ZIP ${doneIds.length} файл(ов)`);
+      const packedTracks = tracks.filter((track) => getBlob(track.id, format, mp3Quality));
+      const packed = await packTracksZip(
+        packedTracks,
+        format,
+        (done, total, title) => {
+          setZip((z) => ({
+            ...z,
+            packing: true,
+            current: title || "Сборка архива",
+            done,
+            total,
+          }));
+        },
+        mp3Quality,
+      );
+      if (packed.packed === 0) {
+        throw new DownloadError("EMPTY", "Не удалось прочитать готовые файлы для архива.");
+      }
+      saveBlob(packed.blob, zipName);
+      noteYt("ok", `ZIP ${packed.packed} файл(ов)`);
       toast.success(
-        skipped > 0
-          ? `ZIP: ${doneIds.length} файл(ов), пропуск ${skipped}`
-          : `ZIP: ${doneIds.length} файл(ов)`,
+        skipped + packed.skipped.length > 0
+          ? `ZIP: ${packed.packed} файл(ов), пропуск ${skipped + packed.skipped.length}`
+          : `ZIP: ${packed.packed} файл(ов)`,
       );
     } catch (err) {
       if (isAbortError(err) || ac.signal.aborted) {
         toast.message("Отменено");
       } else {
-        const message = err instanceof Error ? err.message : "Не удалось собрать ZIP";
+        const raw = err instanceof Error ? err.message : "Не удалось собрать ZIP";
+        const message = /networkerror|failed to fetch|load failed/i.test(raw)
+          ? "Не удалось забрать файл для архива. Попробуйте меньше треков или скачайте по одному."
+          : raw;
         noteYt("error", message);
         toast.error(message);
       }
