@@ -32,7 +32,7 @@ import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
 import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, ensureServerJob } from "@/lib/download-client";
-import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, startJob, waitForJob, zipDownloadUrl } from "@/lib/jobs-client";
+import { cancelJob, fetchJobFile, fetchJobsZip, jobDownloadUrl, listJobs, startBrowserDownload, startJob, waitForJob } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
@@ -553,25 +553,40 @@ export function OctavaApp() {
 
     setZip((z) => ({ ...z, packing: true, current: "Упаковка ZIP", done: doneIds.length }));
     const stamp = new Date().toISOString().slice(0, 10);
-    const name = result?.kind === "playlist" ? safeFilename(result.title) : "octava";
+    const name =
+      result?.kind === "playlist"
+        ? safeFilename(result.title)
+        : playlists.find((p) => p.id === activePlaylistId)?.name
+          ? safeFilename(playlists.find((p) => p.id === activePlaylistId)!.name)
+          : "octava";
     const zipName = `${name}-${stamp}.zip`;
-    const url = zipDownloadUrl(doneIds, `${name}-${stamp}`);
-    startBrowserDownload(url, zipName);
-    noteYt("ok", `ZIP ${doneIds.length} файл(ов)`);
-    toast.success(
-      skipped > 0
-        ? `ZIP: ${doneIds.length} файл(ов), пропуск ${skipped}`
-        : `ZIP: ${doneIds.length} файл(ов)`,
-      {
-        duration: 16_000,
-        action: {
-          label: "На устройство",
-          onClick: () => startBrowserDownload(url, zipName),
-        },
-      },
-    );
-    zipAbort.current = null;
-    setZip(ZIP_IDLE);
+    try {
+      const blob = await fetchJobsZip(doneIds, `${name}-${stamp}`, ac.signal);
+      if (ac.signal.aborted) {
+        toast.message("Отменено");
+        setZip(ZIP_IDLE);
+        zipAbort.current = null;
+        return;
+      }
+      saveBlob(blob, zipName);
+      noteYt("ok", `ZIP ${doneIds.length} файл(ов)`);
+      toast.success(
+        skipped > 0
+          ? `ZIP: ${doneIds.length} файл(ов), пропуск ${skipped}`
+          : `ZIP: ${doneIds.length} файл(ов)`,
+      );
+    } catch (err) {
+      if (isAbortError(err) || ac.signal.aborted) {
+        toast.message("Отменено");
+      } else {
+        const message = err instanceof Error ? err.message : "Не удалось собрать ZIP";
+        noteYt("error", message);
+        toast.error(message);
+      }
+    } finally {
+      zipAbort.current = null;
+      setZip(ZIP_IDLE);
+    }
   }
 
   function submitNewPlaylist() {

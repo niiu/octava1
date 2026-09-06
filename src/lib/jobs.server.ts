@@ -324,33 +324,47 @@ export async function streamJobFile(jobId: string): Promise<Response> {
 }
 
 export async function streamJobsZip(jobIds: string[], zipName = "octava.zip"): Promise<Response> {
-  await ensureLoaded();
-  const zip = new JSZip();
-  let packed = 0;
-  const used = new Set<string>();
-  for (const id of jobIds) {
-    const job = jobs.get(id);
-    if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
-    const buf = await readFile(job.filePath);
-    if (buf.byteLength < 4_096) continue;
-    packed += 1;
-    let name = job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`;
-    if (used.has(name)) name = `${packed.toString().padStart(2, "0")} ${name}`;
-    used.add(name);
-    zip.file(`${packed.toString().padStart(2, "0")} ${name}`, buf);
+  try {
+    await ensureLoaded();
+    const zip = new JSZip();
+    let packed = 0;
+    const used = new Set<string>();
+    for (const id of jobIds) {
+      const job = jobs.get(id);
+      if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
+      const buf = await readFile(job.filePath);
+      if (buf.byteLength < 4_096) continue;
+      packed += 1;
+      let name = job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`;
+      if (used.has(name)) name = `${packed.toString().padStart(2, "0")} ${name}`;
+      used.add(name);
+      zip.file(`${packed.toString().padStart(2, "0")} ${name}`, buf);
+    }
+    if (packed === 0) {
+      return Response.json(
+        { code: "EMPTY", message: "Нет готовых файлов для архива. Скачайте треки ещё раз." },
+        { status: 400 },
+      );
+    }
+    const body = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
+    const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
+    return new Response(Buffer.from(body), {
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": contentDisposition(filename),
+        "content-length": String(body.byteLength),
+        "cache-control": "private, no-store",
+      },
+    });
+  } catch (err) {
+    return Response.json(
+      {
+        code: "ZIP",
+        message: err instanceof Error ? err.message : "Не удалось собрать ZIP",
+      },
+      { status: 500 },
+    );
   }
-  if (packed === 0) {
-    return Response.json({ code: "EMPTY", message: "Нет готовых файлов для архива." }, { status: 400 });
-  }
-  const body = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
-  const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
-  return new Response(Buffer.from(body), {
-    headers: {
-      "content-type": "application/zip",
-      "content-disposition": contentDisposition(filename),
-      "cache-control": "private, no-store",
-    },
-  });
 }
 
 export function jobErrorLog(): string {

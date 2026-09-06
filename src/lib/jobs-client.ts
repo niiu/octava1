@@ -83,6 +83,36 @@ export function zipDownloadUrl(jobIds: string[], name = "octava"): string {
   return `/api/zip?ids=${encodeURIComponent(ids)}&name=${encodeURIComponent(name)}`;
 }
 
+export async function fetchJobsZip(
+  jobIds: string[],
+  name = "octava",
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const ids = jobIds.filter(Boolean);
+  if (ids.length === 0) {
+    throw new DownloadError("EMPTY", "Нет готовых файлов для архива.");
+  }
+  const res = await fetch("/api/zip", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    cache: "no-store",
+    signal,
+    body: JSON.stringify({ ids, name }),
+  });
+  if (!res.ok) {
+    const body = await readJson(res);
+    throw new DownloadError(
+      typeof body.code === "string" ? body.code : "ZIP",
+      typeof body.message === "string" ? body.message : `Не удалось собрать ZIP (${res.status})`,
+    );
+  }
+  const blob = await res.blob();
+  if (blob.size < 64) {
+    throw new DownloadError("EMPTY", "Архив получился пустым.");
+  }
+  return blob;
+}
+
 export function startBrowserDownload(url: string, filename: string): void {
   const a = document.createElement("a");
   a.href = url;
