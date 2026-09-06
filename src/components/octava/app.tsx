@@ -11,6 +11,7 @@ import {
   Play,
   Plus,
   Search,
+  Share2,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -36,7 +37,7 @@ import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
 import { ingestYtText, noteYt, resetYtDownloadRatio } from "@/lib/yt-log-client";
-import type { AudioFormat, DownloadJob, ExtractorCaps, Mp3Quality, Track } from "@/lib/media";
+import type { AudioFormat, DownloadJob, ExtractorCaps, LocalPlaylist, Mp3Quality, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
   MP3_QUALITIES,
@@ -51,6 +52,15 @@ import {
 import { saveBlob } from "@/lib/pack-zip";
 import { useLibrary } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import {
+  decodeShare,
+  encodeShare,
+  playlistToShare,
+  readShareParam,
+  sharePageUrl,
+  shareTracks,
+  youtubeListText,
+} from "@/lib/share";
 
 type ZipPhase = {
   open: boolean;
@@ -89,6 +99,9 @@ export function OctavaApp() {
   const [newPlOpen, setNewPlOpen] = useState(false);
   const [newPlName, setNewPlName] = useState("");
   const [pendingAdd, setPendingAdd] = useState<string[] | null>(null);
+  const [sharePl, setSharePl] = useState<LocalPlaylist | null>(null);
+  const [shareLink, setShareLink] = useState("");
+  const [incomingName, setIncomingName] = useState<string | null>(null);
   const [zip, setZip] = useState<ZipPhase>(ZIP_IDLE);
   const zipAbort = useRef<AbortController | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({});
@@ -120,6 +133,32 @@ export function OctavaApp() {
 
   useEffect(() => {
     void useLibrary.persist.rehydrate();
+  }, []);
+
+  useEffect(() => {
+    const token = readShareParam(window.location.search);
+    if (!token) return;
+    const payload = decodeShare(token);
+    if (!payload) return;
+    const unsub = useLibrary.persist.onFinishHydration(() => {
+      const tracks = shareTracks(payload);
+      const id = useLibrary.getState().importShared(payload.n, tracks);
+      setActivePlaylistId(id);
+      setIncomingName(payload.n);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("p");
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    });
+    if (useLibrary.persist.hasHydrated()) {
+      const tracks = shareTracks(payload);
+      const id = useLibrary.getState().importShared(payload.n, tracks);
+      setActivePlaylistId(id);
+      setIncomingName(payload.n);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("p");
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    }
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -627,6 +666,28 @@ export function OctavaApp() {
                   variant="ghost"
                   size="icon-sm"
                   className="opacity-70 md:opacity-0 md:group-hover:opacity-100"
+                  aria-label={`Поделиться ${pl.name}`}
+                  disabled={pl.trackIds.length === 0}
+                  onClick={() => {
+                    if (pl.trackIds.length === 0) {
+                      toast.message("В сборке пока нет треков");
+                      return;
+                    }
+                    const payload = playlistToShare(pl, catalog);
+                    if (payload.t.length === 0) {
+                      toast.message("Не из чего собрать ссылку");
+                      return;
+                    }
+                    setShareLink(sharePageUrl(encodeShare(payload)));
+                    setSharePl(pl);
+                  }}
+                >
+                  <Share2 className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="opacity-70 md:opacity-0 md:group-hover:opacity-100"
                   aria-label={`Удалить ${pl.name}`}
                   onClick={() => {
                     deletePlaylist(pl.id);
@@ -683,6 +744,17 @@ export function OctavaApp() {
             <YtConsole busy={busy || zip.open || Boolean(fetchingId) || jobsBusy} />
           </div>
 
+          {incomingName ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-raised px-3 py-2 text-sm">
+              <p>
+                Вам отправили сборку «{incomingName}». Она сохранена в этом браузере.
+              </p>
+              <Button variant="ghost" size="sm" onClick={() => setIncomingName(null)}>
+                Скрыть
+              </Button>
+            </div>
+          ) : null}
+
           {caps && !caps.ytdlp ? (
             <p className="mt-3 text-sm text-danger">
               Движок yt-dlp не найден.{" "}
@@ -714,6 +786,31 @@ export function OctavaApp() {
                 mp3Quality={mp3Quality}
                 onMp3Quality={setMp3Quality}
               />
+              {typeof activePlaylistId === "string" &&
+              activePlaylistId !== "inbox" &&
+              activePlaylistId !== "history" ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={
+                    (playlists.find((p) => p.id === activePlaylistId)?.trackIds.length ?? 0) === 0
+                  }
+                  onClick={() => {
+                    const pl = playlists.find((p) => p.id === activePlaylistId);
+                    if (!pl) return;
+                    const payload = playlistToShare(pl, catalog);
+                    if (payload.t.length === 0) {
+                      toast.message("Не из чего собрать ссылку");
+                      return;
+                    }
+                    setShareLink(sharePageUrl(encodeShare(payload)));
+                    setSharePl(pl);
+                  }}
+                >
+                  <Share2 className="size-4" />
+                  Поделиться
+                </Button>
+              ) : null}
               <Button
                 variant="secondary"
                 size="sm"
@@ -959,6 +1056,62 @@ export function OctavaApp() {
             ) : null}
             <Button type="submit">Создать</Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(sharePl)} onOpenChange={(open) => !open && setSharePl(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Поделиться «{sharePl?.name}»</DialogTitle>
+            <DialogDescription>
+              Ссылка открывает сборку у другого человека — без аккаунта, только треки.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <Input readOnly value={shareLink} onFocus={(e) => e.currentTarget.select()} />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(shareLink).then(
+                    () => toast.success("Ссылка скопирована"),
+                    () => toast.error("Не удалось скопировать"),
+                  );
+                }}
+              >
+                Скопировать ссылку
+              </Button>
+              {typeof navigator !== "undefined" && "share" in navigator ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    void navigator.share({
+                      title: sharePl?.name ?? "Octava",
+                      text: `Сборка «${sharePl?.name ?? ""}» в Octava`,
+                      url: shareLink,
+                    });
+                  }}
+                >
+                  Отправить
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  if (!sharePl) return;
+                  const payload = playlistToShare(sharePl, catalog);
+                  void navigator.clipboard.writeText(youtubeListText(payload)).then(
+                    () => toast.success("Список ссылок скопирован"),
+                    () => toast.error("Не удалось скопировать"),
+                  );
+                }}
+              >
+                Список YouTube
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

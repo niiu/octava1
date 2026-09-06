@@ -98,6 +98,10 @@ export function parseYoutubeInput(raw: string): ParsedInput {
   return { kind: "search", query: input };
 }
 
+export function isVideoId(id: string): boolean {
+  return VIDEO_ID.test(id);
+}
+
 export function toYtdlpTarget(parsed: Exclude<ParsedInput, { kind: "empty" }>): string {
   if (parsed.kind === "search") return `ytsearch8:${parsed.query}`;
   if (parsed.kind === "playlist") {

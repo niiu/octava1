@@ -25,6 +25,7 @@ type AppState = {
   deletePlaylist: (id: string) => void;
   addToPlaylist: (playlistId: string, trackIds: string[]) => void;
   removeFromPlaylist: (playlistId: string, trackId: string) => void;
+  importShared: (name: string, tracks: Track[]) => string;
   clearHistory: () => void;
 };
 
@@ -102,6 +103,24 @@ export const useLibrary = create<AppState>()(
               : p,
           ),
         }),
+      importShared: (name, tracks) => {
+        get().remember(tracks);
+        const incoming = tracks.map((t) => t.id);
+        const title = name.trim() || "Подборка";
+        const existing = get().playlists.find(
+          (p) => p.name === title && p.trackIds.join() === incoming.join(),
+        );
+        if (existing) return existing.id;
+        const id = newId("pl");
+        const playlist: LocalPlaylist = {
+          id,
+          name: title,
+          trackIds: incoming,
+          createdAt: Date.now(),
+        };
+        set({ playlists: [playlist, ...get().playlists] });
+        return id;
+      },
       clearHistory: () => set({ historyIds: [] }),
     }),
     {
