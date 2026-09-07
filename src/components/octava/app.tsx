@@ -30,9 +30,9 @@ import { Separator } from "@/components/ui/separator";
 import { Wordmark } from "@/components/octava/logo";
 import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
-import { getBlob, getBlobUrl, hasBlob, clearBlob } from "@/lib/blobs";
+import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, ensureServerJob } from "@/lib/download-client";
-import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, startJob, waitForJob } from "@/lib/jobs-client";
+import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, prepareJobsZip, startBrowserDownload, startJob, waitForJob, zipFileUrl } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
@@ -49,7 +49,7 @@ import {
   safeFilename,
   extensionFor,
 } from "@/lib/media";
-import { packTracksZip, saveBlob } from "@/lib/pack-zip";
+import { saveBlob } from "@/lib/pack-zip";
 import { useLibrary } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
@@ -563,7 +563,13 @@ export function OctavaApp() {
       return;
     }
 
-    setZip((z) => ({ ...z, packing: true, current: "Сборка архива", done: 0, total: readyJobs.length }));
+    setZip((z) => ({
+      ...z,
+      packing: true,
+      current: "Сборка на сервере",
+      done: readyJobs.length,
+      total: readyJobs.length,
+    }));
     const stamp = new Date().toISOString().slice(0, 10);
     const collection =
       result?.kind === "playlist"
@@ -572,51 +578,26 @@ export function OctavaApp() {
     const name = safeFilename(collection || "octava");
     const zipName = `${name}-${stamp}.zip`;
     try {
-      for (let i = 0; i < readyJobs.length; i++) {
-        if (ac.signal.aborted) throw new DOMException("Aborted", "AbortError");
-        const job = readyJobs[i]!;
-        setZip((z) => ({
-          ...z,
-          packing: true,
-          current: job.title,
-          done: i,
-          total: readyJobs.length,
-        }));
-        noteYt("info", `в архив ${i + 1}/${readyJobs.length} · «${job.title}»`);
-        try {
-          if (!getBlob(job.videoId, job.format, job.quality)) {
-            await fetchJobFile(job, job.quality, ac.signal);
-          }
-        } catch (err) {
-          if (ac.signal.aborted || isAbortError(err)) throw err;
-          clearBlob(job.videoId, job.format, job.quality);
-          await fetchJobFile(job, job.quality, ac.signal);
-        }
-      }
-      const packedTracks = tracks.filter((track) => getBlob(track.id, format, mp3Quality));
-      const packed = await packTracksZip(
-        packedTracks,
-        format,
-        (done, total, title) => {
-          setZip((z) => ({
-            ...z,
-            packing: true,
-            current: title || "Сборка архива",
-            done,
-            total,
-          }));
-        },
-        mp3Quality,
+      noteYt("info", `сборка ZIP на сервере · ${readyJobs.length} файл(ов)`);
+      const packed = await prepareJobsZip(
+        readyJobs.map((job) => job.jobId),
+        `${name}-${stamp}`,
+        ac.signal,
       );
-      if (packed.packed === 0) {
-        throw new DownloadError("EMPTY", "Не удалось прочитать готовые файлы для архива.");
-      }
-      saveBlob(packed.blob, zipName);
-      noteYt("ok", `ZIP ${packed.packed} файл(ов)`);
+      if (ac.signal.aborted) throw new DOMException("Aborted", "AbortError");
+      startBrowserDownload(zipFileUrl(packed.id), packed.filename || zipName);
+      noteYt("ok", `ZIP ${readyJobs.length} файл(ов)${packed.bytes ? ` · ${formatBytes(packed.bytes)}` : ""}`);
       toast.success(
-        skipped + packed.skipped.length > 0
-          ? `ZIP: ${packed.packed} файл(ов), пропуск ${skipped + packed.skipped.length}`
-          : `ZIP: ${packed.packed} файл(ов)`,
+        skipped > 0
+          ? `ZIP: ${readyJobs.length} файл(ов), пропуск ${skipped}`
+          : `ZIP: ${readyJobs.length} файл(ов)`,
+        {
+          duration: 16_000,
+          action: {
+            label: "Ещё раз",
+            onClick: () => startBrowserDownload(zipFileUrl(packed.id), packed.filename || zipName),
+          },
+        },
       );
     } catch (err) {
       if (isAbortError(err) || ac.signal.aborted) {

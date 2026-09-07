@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { streamJobsZip } from "@/lib/jobs.server";
+import { buildJobsZip, streamJobsZip, streamPackedZip } from "@/lib/jobs.server";
 import { safeFilename } from "@/lib/media";
 
 function parseIds(raw: unknown): string[] {
@@ -21,6 +21,8 @@ export const Route = createFileRoute("/api/zip")({
     handlers: {
       GET: async ({ request }) => {
         const url = new URL(request.url);
+        const file = url.searchParams.get("file")?.trim();
+        if (file) return streamPackedZip(file);
         const ids = parseIds(url.searchParams.get("ids"));
         if (ids.length === 0) {
           return Response.json({ code: "BAD_ID", message: "Нет id заданий" }, { status: 400 });
@@ -40,7 +42,9 @@ export const Route = createFileRoute("/api/zip")({
           return Response.json({ code: "BAD_ID", message: "Нет id заданий" }, { status: 400 });
         }
         const rawName = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "octava";
-        return streamJobsZip(ids, `${safeFilename(rawName)}.zip`);
+        const built = await buildJobsZip(ids, `${safeFilename(rawName)}.zip`);
+        if (built instanceof Response) return built;
+        return Response.json({ zip: built });
       },
     },
   },

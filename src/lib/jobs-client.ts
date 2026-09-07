@@ -83,11 +83,15 @@ export function zipDownloadUrl(jobIds: string[], name = "octava"): string {
   return `/api/zip?ids=${encodeURIComponent(ids)}&name=${encodeURIComponent(name)}`;
 }
 
-export async function fetchJobsZip(
+export function zipFileUrl(fileId: string): string {
+  return `/api/zip?file=${encodeURIComponent(fileId)}`;
+}
+
+export async function prepareJobsZip(
   jobIds: string[],
   name = "octava",
   signal?: AbortSignal,
-): Promise<Blob> {
+): Promise<{ id: string; filename: string; bytes: number }> {
   const ids = jobIds.filter(Boolean);
   if (ids.length === 0) {
     throw new DownloadError("EMPTY", "Нет готовых файлов для архива.");
@@ -99,18 +103,19 @@ export async function fetchJobsZip(
     signal,
     body: JSON.stringify({ ids, name }),
   });
-  if (!res.ok) {
-    const body = await readJson(res);
+  const body = await readJson(res);
+  const zip = body.zip as { id?: string; filename?: string; bytes?: number } | undefined;
+  if (!res.ok || !zip?.id) {
     throw new DownloadError(
       typeof body.code === "string" ? body.code : "ZIP",
       typeof body.message === "string" ? body.message : `Не удалось собрать ZIP (${res.status})`,
     );
   }
-  const blob = await res.blob();
-  if (blob.size < 64) {
-    throw new DownloadError("EMPTY", "Архив получился пустым.");
-  }
-  return blob;
+  return {
+    id: zip.id,
+    filename: zip.filename || `${name}.zip`,
+    bytes: typeof zip.bytes === "number" ? zip.bytes : 0,
+  };
 }
 
 export function startBrowserDownload(url: string, filename: string): void {

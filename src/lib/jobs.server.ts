@@ -1,16 +1,17 @@
 import { existsSync, mkdirSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { copyFile, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import JSZip from "jszip";
 import {
   ExtractorError,
   extractAudio,
   streamSavedFile,
 } from "./extractor.server";
 import type { AudioFormat, DownloadJob, Mp3Quality } from "./media";
-import { contentDisposition, DEFAULT_MP3_QUALITY, extensionFor, mimeFor, newId, safeFilename } from "./media";
+import { DEFAULT_MP3_QUALITY, extensionFor, mimeFor, newId, safeFilename } from "./media";
 import { dumpLogText, getDownloadProgress } from "./yt-log.server";
+import { pythonBin } from "./python.server";
 
 type JobInternal = DownloadJob & { filePath?: string; duration?: number | null };
 
@@ -323,40 +324,96 @@ export async function streamJobFile(jobId: string): Promise<Response> {
   );
 }
 
-export async function streamJobsZip(jobIds: string[], zipName = "octava.zip"): Promise<Response> {
-  try {
-    await ensureLoaded();
-    const zip = new JSZip();
-    let packed = 0;
-    const used = new Set<string>();
-    for (const id of jobIds) {
-      const job = jobs.get(id);
-      if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
-      const buf = await readFile(job.filePath);
-      if (buf.byteLength < 4_096) continue;
-      packed += 1;
-      let name = job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`;
-      if (used.has(name)) name = `${packed.toString().padStart(2, "0")} ${name}`;
-      used.add(name);
-      zip.file(`${packed.toString().padStart(2, "0")} ${name}`, buf);
-    }
-    if (packed === 0) {
-      return Response.json(
-        { code: "EMPTY", message: "Нет готовых файлов для архива. Скачайте треки ещё раз." },
-        { status: 400 },
-      );
-    }
-    const body = await zip.generateAsync({ type: "uint8array", compression: "STORE" });
-    const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
-    return new Response(Buffer.from(body), {
-      headers: {
-        "content-type": "application/zip",
-        "content-disposition": contentDisposition(filename),
-        "content-length": String(body.byteLength),
-        "cache-control": "private, no-store",
-      },
+type ZipBundle = { id: string; path: string; filename: string; bytes: number; createdAt: number };
+
+function zipRt(): Map<string, ZipBundle> {
+  const g = globalThis as typeof globalThis & { __octavaZipRt?: Map<string, ZipBundle> };
+  if (!g.__octavaZipRt) g.__octavaZipRt = new Map();
+  return g.__octavaZipRt;
+}
+
+function zipDir(): string {
+  const dir = path.join(rt().jobsDir || resolveDir(), "zips");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+async function pruneZips(): Promise<void> {
+  const store = zipRt();
+  const maxAge = 2 * 60 * 60 * 1000;
+  const now = Date.now();
+  for (const [id, bundle] of store) {
+    if (now - bundle.createdAt < maxAge && store.size <= 6) continue;
+    store.delete(id);
+    await unlink(bundle.path).catch(() => undefined);
+  }
+}
+
+function packZipWithPython(
+  outPath: string,
+  entries: Array<{ path: string; name: string }>,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      pythonBin(),
+      [
+        "-c",
+        "import json,sys,zipfile\n" +
+          "out,entries=json.load(sys.stdin)\n" +
+          "with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_STORED,allowZip64=True) as z:\n" +
+          "  for e in entries: z.write(e['path'], e['name'])\n",
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+    let err = "";
+    child.stderr.on("data", (chunk) => {
+      err += String(chunk);
     });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(err.trim() || `zip exit ${code}`));
+    });
+    child.stdin.end(JSON.stringify([outPath, entries]));
+  });
+}
+
+export async function buildJobsZip(
+  jobIds: string[],
+  zipName = "octava.zip",
+): Promise<{ id: string; filename: string; bytes: number } | Response> {
+  await ensureLoaded();
+  await pruneZips();
+  const entries: Array<{ path: string; name: string }> = [];
+  const used = new Set<string>();
+  let packed = 0;
+  for (const id of jobIds) {
+    const job = jobs.get(id);
+    if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
+    const info = await stat(job.filePath).catch(() => null);
+    if (!info || info.size < 4_096) continue;
+    packed += 1;
+    let name = job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`;
+    if (used.has(name)) name = `${packed.toString().padStart(2, "0")} ${name}`;
+    used.add(name);
+    entries.push({ path: job.filePath, name: `${packed.toString().padStart(2, "0")} ${name}` });
+  }
+  if (entries.length === 0) {
+    return Response.json(
+      { code: "EMPTY", message: "Нет готовых файлов для архива. Скачайте треки ещё раз." },
+      { status: 400 },
+    );
+  }
+  const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
+  const id = newId("zip");
+  const outPath = path.join(zipDir(), `${id}.zip`);
+  try {
+    await packZipWithPython(outPath, entries);
+    const info = await stat(outPath);
+    zipRt().set(id, { id, path: outPath, filename, bytes: info.size, createdAt: Date.now() });
+    return { id, filename, bytes: info.size };
   } catch (err) {
+    await unlink(outPath).catch(() => undefined);
     return Response.json(
       {
         code: "ZIP",
@@ -365,6 +422,21 @@ export async function streamJobsZip(jobIds: string[], zipName = "octava.zip"): P
       { status: 500 },
     );
   }
+}
+
+export async function streamPackedZip(id: string): Promise<Response> {
+  await ensureLoaded();
+  const bundle = zipRt().get(id);
+  if (!bundle || !existsSync(bundle.path)) {
+    return Response.json({ code: "NOT_FOUND", message: "Архив уже недоступен. Соберите ZIP снова." }, { status: 404 });
+  }
+  return streamSavedFile(bundle.path, bundle.filename, "application/zip");
+}
+
+export async function streamJobsZip(jobIds: string[], zipName = "octava.zip"): Promise<Response> {
+  const built = await buildJobsZip(jobIds, zipName);
+  if (built instanceof Response) return built;
+  return streamPackedZip(built.id);
 }
 
 export function jobErrorLog(): string {
