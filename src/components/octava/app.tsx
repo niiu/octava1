@@ -30,7 +30,7 @@ import { Separator } from "@/components/ui/separator";
 import { Wordmark } from "@/components/octava/logo";
 import { CookiesPanel } from "@/components/octava/cookies-panel";
 import { YtConsole } from "@/components/octava/console";
-import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
+import { getBlob, getBlobUrl, hasBlob, clearBlob } from "@/lib/blobs";
 import { DownloadError, ensureServerJob } from "@/lib/download-client";
 import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, startBrowserDownload, startJob, waitForJob } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
@@ -81,9 +81,13 @@ const ZIP_IDLE: ZipPhase = {
 };
 
 function isAbortError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const name = "name" in err ? String(err.name) : "";
+  const message = err instanceof Error ? err.message : "";
   return (
-    (typeof DOMException !== "undefined" && err instanceof DOMException && err.name === "AbortError") ||
-    (err instanceof Error && err.name === "AbortError")
+    name === "AbortError" ||
+    (typeof DOMException !== "undefined" && err instanceof DOMException && name === "AbortError") ||
+    /aborted|abort/i.test(message)
   );
 }
 
@@ -408,9 +412,12 @@ export function OctavaApp() {
   }
 
   function cancelActiveJob() {
-    zipAbort.current?.abort();
+    const ac = zipAbort.current;
+    zipAbort.current = null;
+    ac?.abort();
     for (const job of runningJobs) void cancelJob(job.jobId);
     setFetchingId(null);
+    setZip(ZIP_IDLE);
     noteYt("warn", "отмена");
   }
 
@@ -420,7 +427,10 @@ export function OctavaApp() {
       toast.message("Отметьте хотя бы один трек");
       return;
     }
-    if (zipAbort.current) return;
+    if (zipAbort.current && !zipAbort.current.signal.aborted) {
+      zipAbort.current.abort();
+    }
+    zipAbort.current = null;
     const ac = new AbortController();
     zipAbort.current = ac;
     setZip({
@@ -573,8 +583,14 @@ export function OctavaApp() {
           total: readyJobs.length,
         }));
         noteYt("info", `в архив ${i + 1}/${readyJobs.length} · «${job.title}»`);
-        if (!getBlob(job.videoId, job.format, job.quality)) {
-          await fetchJobFile(job, job.quality);
+        try {
+          if (!getBlob(job.videoId, job.format, job.quality)) {
+            await fetchJobFile(job, job.quality, ac.signal);
+          }
+        } catch (err) {
+          if (ac.signal.aborted || isAbortError(err)) throw err;
+          clearBlob(job.videoId, job.format, job.quality);
+          await fetchJobFile(job, job.quality, ac.signal);
         }
       }
       const packedTracks = tracks.filter((track) => getBlob(track.id, format, mp3Quality));

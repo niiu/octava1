@@ -127,26 +127,46 @@ export function startBrowserDownload(url: string, filename: string): void {
 export async function fetchJobFile(
   job: DownloadJob,
   quality: Mp3Quality = DEFAULT_MP3_QUALITY,
+  signal?: AbortSignal,
 ): Promise<Blob> {
-  const res = await fetch(`/api/job?id=${encodeURIComponent(job.jobId)}&download=1`, {
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const body = await readJson(res);
-    throw new DownloadError(
-      typeof body.code === "string" ? body.code : "HTTP",
-      typeof body.message === "string" ? body.message : `Не удалось скачать (${res.status})`,
-    );
+  const qualityArg = job.format === "mp3" ? job.quality : quality;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    try {
+      const res = await fetch(
+        `/api/job?id=${encodeURIComponent(job.jobId)}&download=1&t=${Date.now()}`,
+        { cache: "no-store", signal },
+      );
+      if (!res.ok) {
+        const body = await readJson(res);
+        throw new DownloadError(
+          typeof body.code === "string" ? body.code : "HTTP",
+          typeof body.message === "string" ? body.message : `Не удалось скачать (${res.status})`,
+        );
+      }
+      const blob = await res.blob();
+      if (blob.size < 4_096) {
+        throw new DownloadError(
+          "YOUTUBE_BLOCKED",
+          "YouTube отклонил загрузку. Обновите cookies YouTube и попробуйте снова.",
+        );
+      }
+      setBlob(job.videoId, job.format, blob, qualityArg);
+      return blob;
+    } catch (err) {
+      if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        throw err instanceof Error ? err : new DOMException("Aborted", "AbortError");
+      }
+      lastErr = err;
+      if (attempt < 2) await sleep(350 * (attempt + 1), signal);
+    }
   }
-  const blob = await res.blob();
-  if (blob.size < 4_096) {
-    throw new DownloadError(
-      "YOUTUBE_BLOCKED",
-      "YouTube отклонил загрузку. Обновите cookies YouTube и попробуйте снова.",
-    );
-  }
-  setBlob(job.videoId, job.format, blob, job.format === "mp3" ? job.quality : quality);
-  return blob;
+  if (lastErr instanceof DownloadError) throw lastErr;
+  throw new DownloadError(
+    "HTTP",
+    lastErr instanceof Error ? lastErr.message : "Не удалось забрать файл",
+  );
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

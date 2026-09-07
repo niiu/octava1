@@ -43,6 +43,18 @@ export function getBlobUrl(
   return urls.get(blobKey(id, format, quality));
 }
 
+export function clearBlob(
+  id: string,
+  format: AudioFormat,
+  quality: Mp3Quality = DEFAULT_MP3_QUALITY,
+): void {
+  const key = blobKey(id, format, quality);
+  const prev = urls.get(key);
+  if (prev) URL.revokeObjectURL(prev);
+  urls.delete(key);
+  blobs.delete(key);
+}
+
 export function clearBlobs(): void {
   for (const url of urls.values()) URL.revokeObjectURL(url);
   blobs.clear();
