@@ -238,9 +238,11 @@ export function beginExtractLog(info: {
   s.mediaDuration = info.duration && info.duration > 0 ? info.duration : 0;
   resetDownloadProgress();
   const how =
-    info.encode && info.format === "mp3"
-      ? `mp3 ${info.quality || "192"}k`
-      : info.format;
+    info.format === "source"
+      ? "webm 480"
+      : info.encode && info.format === "mp3"
+        ? `mp3 ${info.quality || "192"}k`
+        : info.format;
   pushLine("ok", `сейчас ${who()} · ${how}`);
 }
 

@@ -822,8 +822,8 @@ export function OctavaApp() {
                 value={format}
                 ffmpeg={caps?.ffmpeg !== false}
                 onChange={(next) => {
-                  if (next === "mp3" && caps && !caps.ffmpeg) {
-                    toast.message("Для MP3 нужен ffmpeg — откройте «Установка»");
+                  if ((next === "mp3" || next === "source") && caps && !caps.ffmpeg) {
+                    toast.message("Для WebM и MP3 нужен ffmpeg — откройте «Установка»");
                     return;
                   }
                   setFormat(next);
@@ -1218,7 +1218,7 @@ function FormatSwitch({
             id={`octava-format-${opt}`}
             type="button"
             onClick={() => onChange(opt)}
-            disabled={opt === "mp3" && !ffmpeg}
+            disabled={(opt === "mp3" || opt === "source") && !ffmpeg}
             className={cn(
               "h-8 rounded-sm px-2.5 text-xs font-medium",
               value === opt ? "bg-fg text-bg" : "text-muted hover:text-fg",

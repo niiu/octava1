@@ -285,13 +285,13 @@ function mapExecError(err: unknown): ExtractorError {
   } else if (/requested format is not available/i.test(blob)) {
     mapped = new ExtractorError(
       "NO_FORMAT",
-      "Для этого ролика нет подходящей аудиодорожки. Попробуйте формат «как есть» или обновите cookies.",
+      "Для этого ролика нет подходящей дорожки. Попробуйте WebM 480 или обновите cookies.",
       stderr,
     );
   } else if (/ffmpeg exited with code -?11|signal 11|SIGSEGV/i.test(blob)) {
     mapped = new ExtractorError(
       "FFMPEG",
-      "ffmpeg не смог перекодировать этот файл. Попробуйте формат M4A или «как есть».",
+      "ffmpeg не смог перекодировать этот файл. Попробуйте M4A или WebM 480.",
       stderr,
     );
   } else if (/HTTP Error 403|403: Forbidden/i.test(blob)) {
@@ -530,8 +530,19 @@ function formatAttempts(format: AudioFormat, quality: Mp3Quality): string[][] {
     ];
   }
   return [
-    ["-f", "ba[ext=m4a]/ba/b"],
-    ["-f", "ba/b"],
+    [
+      "-f",
+      "bestvideo[ext=webm][height<=480]+bestaudio[ext=webm]/bestvideo[height<=480][ext=webm]+bestaudio/best[ext=webm][height<=480]",
+      "--merge-output-format",
+      "webm",
+    ],
+    [
+      "-f",
+      "bestvideo[height<=480]+bestaudio/best[height<=480]",
+      "--merge-output-format",
+      "webm",
+    ],
+    ["-f", "bv*[height<=480]+ba/b[height<=480]/b"],
   ];
 }
 
@@ -542,13 +553,25 @@ function isRetryableFormatError(stderr: string): boolean {
 function preferredExts(format: AudioFormat): string[] {
   if (format === "mp3") return [".mp3"];
   if (format === "m4a") return [".m4a", ".mp4", ".aac"];
+  if (format === "source") return [".webm", ".mkv", ".mp4"];
   return [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".aac"];
 }
 
 function pickAudioName(files: string[], format: AudioFormat): string | undefined {
-  const audioExt = new Set([".mp3", ".m4a", ".mp4", ".webm", ".opus", ".ogg", ".aac", ".wav", ".flac"]);
-  const audio = files.filter((name) => audioExt.has(path.extname(name).toLowerCase()));
-  const pool = audio.length > 0 ? audio : files;
+  const mediaExt = new Set([
+    ".mp3",
+    ".m4a",
+    ".mp4",
+    ".webm",
+    ".mkv",
+    ".opus",
+    ".ogg",
+    ".aac",
+    ".wav",
+    ".flac",
+  ]);
+  const media = files.filter((name) => mediaExt.has(path.extname(name).toLowerCase()));
+  const pool = media.length > 0 ? media : files;
   const pref = preferredExts(format);
   return [...pool].sort((a, b) => {
     const ia = pref.indexOf(path.extname(a).toLowerCase());
@@ -627,7 +650,9 @@ export async function extractAudio(
             "before_dl:title:%(title)s",
             ...(format === "mp3" || format === "m4a"
               ? ["--postprocessor-args", "ExtractAudio:-nostats -progress pipe:2"]
-              : []),
+              : format === "source"
+                ? ["--postprocessor-args", "Merger:-nostats -progress pipe:2"]
+                : []),
             "-o",
             outTpl,
             "--",
@@ -687,7 +712,9 @@ export async function extractAudio(
             "YouTube отклонил загрузку с этого сервера. Добавьте cookies YouTube или запустите установщик у себя.",
           );
         }
-        const ext = path.extname(audio).slice(1) || (format === "mp3" ? "mp3" : "m4a");
+        const ext =
+          path.extname(audio).slice(1) ||
+          (format === "mp3" ? "mp3" : format === "source" ? "webm" : "m4a");
         const titleGuess = audio.replace(/\.[^.]+$/, "") || videoId;
         onProgress?.(1);
         appendLog("ok", `готово ${videoId} · ${info.size} байт`);

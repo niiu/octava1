@@ -81,7 +81,7 @@ export type DownloadJob = {
 export const FORMAT_LABEL: Record<AudioFormat, string> = {
   m4a: "M4A",
   mp3: "MP3",
-  source: "как есть",
+  source: "WebM 480",
 };
 
 export function formatDuration(sec: number | null | undefined): string {
@@ -123,10 +123,11 @@ export function safeFilename(name: string, max = 96): string {
 export function extensionFor(format: AudioFormat, mime?: string): string {
   if (format === "mp3") return "mp3";
   if (format === "m4a") return "m4a";
+  if (format === "source") return "webm";
+  if (mime?.includes("webm")) return "webm";
   if (mime?.includes("mp4") || mime?.includes("m4a") || mime?.includes("aac")) {
     return "m4a";
   }
-  if (mime?.includes("webm") || mime?.includes("opus")) return "webm";
   if (mime?.includes("mpeg") || mime?.includes("mp3")) return "mp3";
   return "m4a";
 }
@@ -134,6 +135,7 @@ export function extensionFor(format: AudioFormat, mime?: string): string {
 export function mimeFor(format: AudioFormat): string {
   if (format === "mp3") return "audio/mpeg";
   if (format === "m4a") return "audio/mp4";
+  if (format === "source") return "video/webm";
   return "application/octet-stream";
 }
 
