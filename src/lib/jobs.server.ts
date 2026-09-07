@@ -324,7 +324,14 @@ export async function streamJobFile(jobId: string): Promise<Response> {
   );
 }
 
-type ZipBundle = { id: string; path: string; filename: string; bytes: number; createdAt: number };
+type ZipBundle = {
+  id: string;
+  path: string;
+  filename: string;
+  bytes: number;
+  createdAt: number;
+  fingerprint: string;
+};
 
 function zipRt(): Map<string, ZipBundle> {
   const g = globalThis as typeof globalThis & { __octavaZipRt?: Map<string, ZipBundle> };
@@ -338,15 +345,66 @@ function zipDir(): string {
   return dir;
 }
 
+function zipIndexPath(): string {
+  return path.join(zipDir(), "index.json");
+}
+
+function persistZips(): void {
+  const payload = JSON.stringify({ bundles: [...zipRt().values()] });
+  void writeFile(zipIndexPath(), payload, "utf8").catch(() => undefined);
+}
+
+async function loadZips(): Promise<void> {
+  const g = globalThis as typeof globalThis & { __octavaZipLoaded?: boolean };
+  if (g.__octavaZipLoaded) return;
+  g.__octavaZipLoaded = true;
+  try {
+    const raw = await readFile(zipIndexPath(), "utf8");
+    const parsed = JSON.parse(raw) as { bundles?: ZipBundle[] };
+    for (const bundle of parsed.bundles ?? []) {
+      if (!bundle?.id || !bundle.path || !bundle.fingerprint || !existsSync(bundle.path)) continue;
+      zipRt().set(bundle.id, bundle);
+    }
+  } catch {
+    /* first run */
+  }
+}
+
 async function pruneZips(): Promise<void> {
+  await loadZips();
   const store = zipRt();
-  const maxAge = 2 * 60 * 60 * 1000;
+  const maxAge = 12 * 60 * 60 * 1000;
   const now = Date.now();
+  let changed = false;
   for (const [id, bundle] of store) {
-    if (now - bundle.createdAt < maxAge && store.size <= 6) continue;
+    if (existsSync(bundle.path) && now - bundle.createdAt <= maxAge) continue;
     store.delete(id);
     await unlink(bundle.path).catch(() => undefined);
+    changed = true;
   }
+  const extra = [...store.values()].sort((a, b) => a.createdAt - b.createdAt);
+  while (extra.length > 8) {
+    const old = extra.shift();
+    if (!old) break;
+    store.delete(old.id);
+    await unlink(old.path).catch(() => undefined);
+    changed = true;
+  }
+  if (changed) persistZips();
+}
+
+function fingerprintFor(entries: Array<{ path: string; name: string; size: number }>): string {
+  return entries
+    .map((entry) => `${entry.path}:${entry.size}`)
+    .sort()
+    .join("|");
+}
+
+function findReadyZip(fingerprint: string): ZipBundle | undefined {
+  for (const bundle of zipRt().values()) {
+    if (bundle.fingerprint === fingerprint && existsSync(bundle.path)) return bundle;
+  }
+  return undefined;
 }
 
 function packZipWithPython(
@@ -381,10 +439,10 @@ function packZipWithPython(
 export async function buildJobsZip(
   jobIds: string[],
   zipName = "octava.zip",
-): Promise<{ id: string; filename: string; bytes: number } | Response> {
+): Promise<{ id: string; filename: string; bytes: number; reused?: boolean } | Response> {
   await ensureLoaded();
   await pruneZips();
-  const entries: Array<{ path: string; name: string }> = [];
+  const entries: Array<{ path: string; name: string; size: number }> = [];
   const used = new Set<string>();
   let packed = 0;
   for (const id of jobIds) {
@@ -396,7 +454,11 @@ export async function buildJobsZip(
     let name = job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`;
     if (used.has(name)) name = `${packed.toString().padStart(2, "0")} ${name}`;
     used.add(name);
-    entries.push({ path: job.filePath, name: `${packed.toString().padStart(2, "0")} ${name}` });
+    entries.push({
+      path: job.filePath,
+      name: `${packed.toString().padStart(2, "0")} ${name}`,
+      size: info.size,
+    });
   }
   if (entries.length === 0) {
     return Response.json(
@@ -405,13 +467,35 @@ export async function buildJobsZip(
     );
   }
   const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
+  const fingerprint = fingerprintFor(entries);
+  const ready = findReadyZip(fingerprint);
+  if (ready) {
+    const info = await stat(ready.path).catch(() => null);
+    if (info && info.size >= 64) {
+      ready.filename = filename;
+      ready.bytes = info.size;
+      persistZips();
+      return { id: ready.id, filename, bytes: info.size, reused: true };
+    }
+  }
   const id = newId("zip");
   const outPath = path.join(zipDir(), `${id}.zip`);
   try {
-    await packZipWithPython(outPath, entries);
+    await packZipWithPython(
+      outPath,
+      entries.map(({ path: filePath, name }) => ({ path: filePath, name })),
+    );
     const info = await stat(outPath);
-    zipRt().set(id, { id, path: outPath, filename, bytes: info.size, createdAt: Date.now() });
-    return { id, filename, bytes: info.size };
+    zipRt().set(id, {
+      id,
+      path: outPath,
+      filename,
+      bytes: info.size,
+      createdAt: Date.now(),
+      fingerprint,
+    });
+    persistZips();
+    return { id, filename, bytes: info.size, reused: false };
   } catch (err) {
     await unlink(outPath).catch(() => undefined);
     return Response.json(

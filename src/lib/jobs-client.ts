@@ -91,7 +91,7 @@ export async function prepareJobsZip(
   jobIds: string[],
   name = "octava",
   signal?: AbortSignal,
-): Promise<{ id: string; filename: string; bytes: number }> {
+): Promise<{ id: string; filename: string; bytes: number; reused: boolean }> {
   const ids = jobIds.filter(Boolean);
   if (ids.length === 0) {
     throw new DownloadError("EMPTY", "Нет готовых файлов для архива.");
@@ -104,7 +104,9 @@ export async function prepareJobsZip(
     body: JSON.stringify({ ids, name }),
   });
   const body = await readJson(res);
-  const zip = body.zip as { id?: string; filename?: string; bytes?: number } | undefined;
+  const zip = body.zip as
+    | { id?: string; filename?: string; bytes?: number; reused?: boolean }
+    | undefined;
   if (!res.ok || !zip?.id) {
     throw new DownloadError(
       typeof body.code === "string" ? body.code : "ZIP",
@@ -115,6 +117,7 @@ export async function prepareJobsZip(
     id: zip.id,
     filename: zip.filename || `${name}.zip`,
     bytes: typeof zip.bytes === "number" ? zip.bytes : 0,
+    reused: Boolean(zip.reused),
   };
 }
 

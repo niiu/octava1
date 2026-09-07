@@ -586,19 +586,19 @@ export function OctavaApp() {
       );
       if (ac.signal.aborted) throw new DOMException("Aborted", "AbortError");
       startBrowserDownload(zipFileUrl(packed.id), packed.filename || zipName);
-      noteYt("ok", `ZIP ${readyJobs.length} файл(ов)${packed.bytes ? ` · ${formatBytes(packed.bytes)}` : ""}`);
-      toast.success(
-        skipped > 0
-          ? `ZIP: ${readyJobs.length} файл(ов), пропуск ${skipped}`
-          : `ZIP: ${readyJobs.length} файл(ов)`,
-        {
-          duration: 16_000,
-          action: {
-            label: "Ещё раз",
-            onClick: () => startBrowserDownload(zipFileUrl(packed.id), packed.filename || zipName),
-          },
-        },
+      noteYt(
+        "ok",
+        packed.reused
+          ? `готовый ZIP${packed.bytes ? ` · ${formatBytes(packed.bytes)}` : ""}`
+          : `ZIP ${readyJobs.length} файл(ов)${packed.bytes ? ` · ${formatBytes(packed.bytes)}` : ""}`,
       );
+      toast.success(packed.reused ? "Скачиваю готовый архив" : `ZIP: ${readyJobs.length} файл(ов)`, {
+        duration: 16_000,
+        action: {
+          label: "Ещё раз",
+          onClick: () => startBrowserDownload(zipFileUrl(packed.id), packed.filename || zipName),
+        },
+      });
     } catch (err) {
       if (isAbortError(err) || ac.signal.aborted) {
         toast.message("Отменено");
