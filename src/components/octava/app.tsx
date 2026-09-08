@@ -36,7 +36,7 @@ import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, prepareJobsZip, star
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
 import { countCookieRows } from "@/lib/cookie-file";
-import { ingestYtText, noteYt, resetYtDownloadRatio } from "@/lib/yt-log-client";
+import { ingestYtText, noteYt, resetYtDownloadRatio, setYtDownloadRatio } from "@/lib/yt-log-client";
 import type { AudioFormat, DownloadJob, ExtractorCaps, LocalPlaylist, Mp3Quality, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
@@ -567,7 +567,7 @@ export function OctavaApp() {
       ...z,
       packing: true,
       current: "Сборка на сервере",
-      done: readyJobs.length,
+      done: 0,
       total: readyJobs.length,
     }));
     const stamp = new Date().toISOString().slice(0, 10);
@@ -578,11 +578,29 @@ export function OctavaApp() {
     const name = safeFilename(collection || "octava");
     const zipName = `${name}-${stamp}.zip`;
     try {
+      resetYtDownloadRatio();
       noteYt("info", `сборка ZIP на сервере · ${readyJobs.length} файл(ов)`);
       const packed = await prepareJobsZip(
         readyJobs.map((job) => job.jobId),
         `${name}-${stamp}`,
         ac.signal,
+        (pack) => {
+          const pct = Math.round(pack.progress * 100);
+          setYtDownloadRatio(pack.progress);
+          setZip((z) => ({
+            ...z,
+            packing: true,
+            current: pack.current || (pack.zip?.reused ? "Готовый архив" : "Сборка архива"),
+            done: pack.packed,
+            total: pack.total || z.total,
+          }));
+          if (pack.status === "packing" && pack.total > 0) {
+            noteYt(
+              "info",
+              `сборка ${pack.packed}/${pack.total} · ${pct}%${pack.current ? ` · ${pack.current}` : ""}`,
+            );
+          }
+        },
       );
       if (ac.signal.aborted) throw new DOMException("Aborted", "AbortError");
       startBrowserDownload(zipFileUrl(packed.id), packed.filename || zipName);
@@ -925,16 +943,15 @@ export function OctavaApp() {
                   zip.open
                     ? !zip.total
                       ? 3
-                      : zip.packing || (!fetchingId && zip.done >= zip.total)
-                        ? 100
-                        : Math.min(
-                            99,
-                            Math.round(
-                              ((zip.done + (fetchingId ? liveRatio * 0.97 : 0)) /
-                                zip.total) *
-                                100,
-                            ),
-                          )
+                      : Math.min(
+                          zip.packing && zip.done >= zip.total ? 100 : 99,
+                          Math.round(
+                            ((zip.done +
+                              (!zip.packing && fetchingId ? liveRatio * 0.97 : 0)) /
+                              zip.total) *
+                              100,
+                          ),
+                        )
                     : Math.min(99, Math.round(liveRatio * 100))
                 }
               />
@@ -942,6 +959,7 @@ export function OctavaApp() {
                 {zip.open ? (
                   <>
                     {zip.done} / {zip.total}
+                    {zip.total > 0 ? ` · ${Math.round((zip.done / zip.total) * 100)}%` : ""}
                     {zip.skipped > 0 ? ` · пропуск ${zip.skipped}` : ""}
                     {!zip.packing && fetchingId
                       ? ` · ${Math.round(liveRatio * 100)}%`

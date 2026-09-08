@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { copyFile, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -410,6 +410,7 @@ function findReadyZip(fingerprint: string): ZipBundle | undefined {
 function packZipWithPython(
   outPath: string,
   entries: Array<{ path: string; name: string }>,
+  onProgress?: (packed: number, total: number, name: string) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -418,12 +419,32 @@ function packZipWithPython(
         "-c",
         "import json,sys,zipfile\n" +
           "out,entries=json.load(sys.stdin)\n" +
+          "n=len(entries)\n" +
           "with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_STORED,allowZip64=True) as z:\n" +
-          "  for e in entries: z.write(e['path'], e['name'])\n",
+          "  for i,e in enumerate(entries,1):\n" +
+          "    z.write(e['path'], e['name'])\n" +
+          "    sys.stdout.write(json.dumps({'i':i,'n':n,'name':e['name']})+'\\n')\n" +
+          "    sys.stdout.flush()\n",
       ],
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     let err = "";
+    let out = "";
+    child.stdout.on("data", (chunk) => {
+      out += String(chunk);
+      const lines = out.split("\n");
+      out = lines.pop() ?? "";
+      for (const line of lines) {
+        try {
+          const row = JSON.parse(line) as { i?: number; n?: number; name?: string };
+          if (typeof row.i === "number" && typeof row.n === "number") {
+            onProgress?.(row.i, row.n, typeof row.name === "string" ? row.name : "");
+          }
+        } catch {
+          /* ignore partial json */
+        }
+      }
+    });
     child.stderr.on("data", (chunk) => {
       err += String(chunk);
     });
@@ -436,19 +457,52 @@ function packZipWithPython(
   });
 }
 
-export async function buildJobsZip(
-  jobIds: string[],
-  zipName = "octava.zip",
-): Promise<{ id: string; filename: string; bytes: number; reused?: boolean } | Response> {
-  await ensureLoaded();
-  await pruneZips();
+export type ZipPackPublic = {
+  packId: string;
+  status: "packing" | "done" | "error";
+  progress: number;
+  packed: number;
+  total: number;
+  current: string;
+  zip?: { id: string; filename: string; bytes: number; reused: boolean };
+  error?: string;
+};
+
+type ZipPackInternal = ZipPackPublic & { fingerprint: string; outPath?: string };
+
+function packsRt(): Map<string, ZipPackInternal> {
+  const g = globalThis as typeof globalThis & { __octavaZipPacks?: Map<string, ZipPackInternal> };
+  if (!g.__octavaZipPacks) g.__octavaZipPacks = new Map();
+  return g.__octavaZipPacks;
+}
+
+function publicPack(pack: ZipPackInternal): ZipPackPublic {
+  return {
+    packId: pack.packId,
+    status: pack.status,
+    progress: pack.progress,
+    packed: pack.packed,
+    total: pack.total,
+    current: pack.current,
+    zip: pack.zip,
+    error: pack.error,
+  };
+}
+
+function collectZipEntries(jobIds: string[]): Array<{ path: string; name: string; size: number }> {
   const entries: Array<{ path: string; name: string; size: number }> = [];
   const used = new Set<string>();
   let packed = 0;
   for (const id of jobIds) {
     const job = jobs.get(id);
     if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
-    const info = await stat(job.filePath).catch(() => null);
+    const info = (() => {
+      try {
+        return statSync(job.filePath);
+      } catch {
+        return null;
+      }
+    })();
     if (!info || info.size < 4_096) continue;
     packed += 1;
     let name = job.filename || `${safeFilename(job.title)}.${extensionFor(job.format)}`;
@@ -460,6 +514,16 @@ export async function buildJobsZip(
       size: info.size,
     });
   }
+  return entries;
+}
+
+export async function startZipPack(
+  jobIds: string[],
+  zipName = "octava.zip",
+): Promise<ZipPackPublic | Response> {
+  await ensureLoaded();
+  await pruneZips();
+  const entries = collectZipEntries(jobIds);
   if (entries.length === 0) {
     return Response.json(
       { code: "EMPTY", message: "Нет готовых файлов для архива. Скачайте треки ещё раз." },
@@ -475,37 +539,104 @@ export async function buildJobsZip(
       ready.filename = filename;
       ready.bytes = info.size;
       persistZips();
-      return { id: ready.id, filename, bytes: info.size, reused: true };
+      const packId = newId("zp");
+      const pack: ZipPackInternal = {
+        packId,
+        status: "done",
+        progress: 1,
+        packed: entries.length,
+        total: entries.length,
+        current: "",
+        fingerprint,
+        zip: { id: ready.id, filename, bytes: info.size, reused: true },
+      };
+      packsRt().set(packId, pack);
+      return publicPack(pack);
     }
   }
-  const id = newId("zip");
-  const outPath = path.join(zipDir(), `${id}.zip`);
-  try {
-    await packZipWithPython(
-      outPath,
-      entries.map(({ path: filePath, name }) => ({ path: filePath, name })),
-    );
-    const info = await stat(outPath);
-    zipRt().set(id, {
-      id,
-      path: outPath,
-      filename,
-      bytes: info.size,
-      createdAt: Date.now(),
-      fingerprint,
-    });
-    persistZips();
-    return { id, filename, bytes: info.size, reused: false };
-  } catch (err) {
-    await unlink(outPath).catch(() => undefined);
-    return Response.json(
-      {
-        code: "ZIP",
-        message: err instanceof Error ? err.message : "Не удалось собрать ZIP",
-      },
-      { status: 500 },
-    );
+
+  const packId = newId("zp");
+  const zipId = newId("zip");
+  const outPath = path.join(zipDir(), `${zipId}.zip`);
+  const pack: ZipPackInternal = {
+    packId,
+    status: "packing",
+    progress: 0.02,
+    packed: 0,
+    total: entries.length,
+    current: entries[0]?.name ?? "архив",
+    fingerprint,
+    outPath,
+  };
+  packsRt().set(packId, pack);
+  void (async () => {
+    try {
+      await packZipWithPython(
+        outPath,
+        entries.map(({ path: filePath, name }) => ({ path: filePath, name })),
+        (packedCount, total, name) => {
+          const current = packsRt().get(packId);
+          if (!current || current.status !== "packing") return;
+          current.packed = packedCount;
+          current.total = total;
+          current.current = name.replace(/^\d+\s+/, "");
+          current.progress = Math.min(0.99, packedCount / Math.max(1, total));
+        },
+      );
+      const info = await stat(outPath);
+      zipRt().set(zipId, {
+        id: zipId,
+        path: outPath,
+        filename,
+        bytes: info.size,
+        createdAt: Date.now(),
+        fingerprint,
+      });
+      persistZips();
+      const current = packsRt().get(packId);
+      if (!current) return;
+      current.status = "done";
+      current.progress = 1;
+      current.packed = entries.length;
+      current.total = entries.length;
+      current.current = "";
+      current.zip = { id: zipId, filename, bytes: info.size, reused: false };
+    } catch (err) {
+      await unlink(outPath).catch(() => undefined);
+      const current = packsRt().get(packId);
+      if (!current) return;
+      current.status = "error";
+      current.error = err instanceof Error ? err.message : "Не удалось собрать ZIP";
+    }
+  })();
+  return publicPack(pack);
+}
+
+export async function getZipPack(packId: string): Promise<ZipPackPublic | null> {
+  await ensureLoaded();
+  await loadZips();
+  const pack = packsRt().get(packId);
+  return pack ? publicPack(pack) : null;
+}
+
+export async function buildJobsZip(
+  jobIds: string[],
+  zipName = "octava.zip",
+): Promise<{ id: string; filename: string; bytes: number; reused?: boolean } | Response> {
+  const started = await startZipPack(jobIds, zipName);
+  if (started instanceof Response) return started;
+  if (started.status === "done" && started.zip) return started.zip;
+  const deadline = Date.now() + 30 * 60_000;
+  while (Date.now() < deadline) {
+    const pack = await getZipPack(started.packId);
+    if (!pack) break;
+    if (pack.status === "done" && pack.zip) return pack.zip;
+    if (pack.status === "error") {
+      return Response.json({ code: "ZIP", message: pack.error || "Не удалось собрать ZIP" }, { status: 500 });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  return Response.json({ code: "ZIP", message: "Сборка архива заняла слишком много времени" }, { status: 504 });
 }
 
 export async function streamPackedZip(id: string): Promise<Response> {

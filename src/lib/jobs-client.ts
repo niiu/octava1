@@ -87,10 +87,22 @@ export function zipFileUrl(fileId: string): string {
   return `/api/zip?file=${encodeURIComponent(fileId)}`;
 }
 
+export type ZipPackState = {
+  packId: string;
+  status: "packing" | "done" | "error";
+  progress: number;
+  packed: number;
+  total: number;
+  current: string;
+  zip?: { id: string; filename: string; bytes: number; reused: boolean };
+  error?: string;
+};
+
 export async function prepareJobsZip(
   jobIds: string[],
   name = "octava",
   signal?: AbortSignal,
+  onProgress?: (pack: ZipPackState) => void,
 ): Promise<{ id: string; filename: string; bytes: number; reused: boolean }> {
   const ids = jobIds.filter(Boolean);
   if (ids.length === 0) {
@@ -104,21 +116,64 @@ export async function prepareJobsZip(
     body: JSON.stringify({ ids, name }),
   });
   const body = await readJson(res);
-  const zip = body.zip as
+  const pack = body.pack as ZipPackState | undefined;
+  const zip = (pack?.zip ?? body.zip) as
     | { id?: string; filename?: string; bytes?: number; reused?: boolean }
     | undefined;
-  if (!res.ok || !zip?.id) {
+  if (!res.ok) {
     throw new DownloadError(
       typeof body.code === "string" ? body.code : "ZIP",
       typeof body.message === "string" ? body.message : `Не удалось собрать ZIP (${res.status})`,
     );
   }
-  return {
-    id: zip.id,
-    filename: zip.filename || `${name}.zip`,
-    bytes: typeof zip.bytes === "number" ? zip.bytes : 0,
-    reused: Boolean(zip.reused),
-  };
+  if (pack) onProgress?.(pack);
+  if (pack?.status === "done" && pack.zip?.id) {
+    return {
+      id: pack.zip.id,
+      filename: pack.zip.filename || `${name}.zip`,
+      bytes: pack.zip.bytes,
+      reused: pack.zip.reused,
+    };
+  }
+  if (zip?.id && pack?.status !== "packing") {
+    return {
+      id: zip.id,
+      filename: zip.filename || `${name}.zip`,
+      bytes: typeof zip.bytes === "number" ? zip.bytes : 0,
+      reused: Boolean(zip.reused),
+    };
+  }
+  if (!pack?.packId) {
+    throw new DownloadError("ZIP", "Сервер не начал сборку архива");
+  }
+  while (!signal?.aborted) {
+    await sleep(400, signal);
+    const poll = await fetch(`/api/zip?pack=${encodeURIComponent(pack.packId)}`, {
+      cache: "no-store",
+      signal,
+    });
+    const nextBody = await readJson(poll);
+    const next = nextBody.pack as ZipPackState | undefined;
+    if (!poll.ok || !next) {
+      throw new DownloadError(
+        typeof nextBody.code === "string" ? nextBody.code : "ZIP",
+        typeof nextBody.message === "string" ? nextBody.message : "Сборка архива пропала",
+      );
+    }
+    onProgress?.(next);
+    if (next.status === "done" && next.zip?.id) {
+      return {
+        id: next.zip.id,
+        filename: next.zip.filename || `${name}.zip`,
+        bytes: next.zip.bytes,
+        reused: next.zip.reused,
+      };
+    }
+    if (next.status === "error") {
+      throw new DownloadError("ZIP", next.error || "Не удалось собрать ZIP");
+    }
+  }
+  throw new DOMException("Aborted", "AbortError");
 }
 
 export function startBrowserDownload(url: string, filename: string): void {

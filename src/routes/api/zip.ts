@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { buildJobsZip, streamJobsZip, streamPackedZip } from "@/lib/jobs.server";
+import { getZipPack, startZipPack, streamJobsZip, streamPackedZip } from "@/lib/jobs.server";
 import { safeFilename } from "@/lib/media";
 
 function parseIds(raw: unknown): string[] {
@@ -23,6 +23,14 @@ export const Route = createFileRoute("/api/zip")({
         const url = new URL(request.url);
         const file = url.searchParams.get("file")?.trim();
         if (file) return streamPackedZip(file);
+        const packId = url.searchParams.get("pack")?.trim();
+        if (packId) {
+          const pack = await getZipPack(packId);
+          if (!pack) {
+            return Response.json({ code: "NOT_FOUND", message: "Нет такой сборки архива" }, { status: 404 });
+          }
+          return Response.json({ pack });
+        }
         const ids = parseIds(url.searchParams.get("ids"));
         if (ids.length === 0) {
           return Response.json({ code: "BAD_ID", message: "Нет id заданий" }, { status: 400 });
@@ -42,9 +50,9 @@ export const Route = createFileRoute("/api/zip")({
           return Response.json({ code: "BAD_ID", message: "Нет id заданий" }, { status: 400 });
         }
         const rawName = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "octava";
-        const built = await buildJobsZip(ids, `${safeFilename(rawName)}.zip`);
-        if (built instanceof Response) return built;
-        return Response.json({ zip: built });
+        const pack = await startZipPack(ids, `${safeFilename(rawName)}.zip`);
+        if (pack instanceof Response) return pack;
+        return Response.json({ pack, zip: pack.zip });
       },
     },
   },
