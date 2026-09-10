@@ -19,6 +19,7 @@ import { parseYoutubeInput, toYtdlpTarget } from "./youtube-url";
 import { normalizeCookieFile } from "./cookie-file";
 import { cookieStatus } from "./cookie-store.server";
 import { pythonBin } from "./python.server";
+import { ffmpegBin, withRuntimePath, ytDlpCandidates } from "./runtime-path";
 import {
   appendLog,
   beginExtractLog,
@@ -59,12 +60,7 @@ type YtEntry = {
 };
 
 function ytDlpPath(): string | null {
-  const candidates = [
-    process.env.YT_DLP_PATH,
-    path.join(process.cwd(), "bin/yt-dlp"),
-    "/workspace/bin/yt-dlp",
-  ].filter((p): p is string => Boolean(p));
-  for (const candidate of candidates) {
+  for (const candidate of ytDlpCandidates()) {
     if (existsSync(candidate)) return candidate;
   }
   return null;
@@ -80,7 +76,7 @@ function cookiesPath(): string | null {
 
 export async function getCaps(): Promise<ExtractorCaps> {
   const ytdlp = Boolean(ytDlpPath());
-  const ffmpeg = existsSync("/usr/local/bin/ffmpeg") || existsSync("/usr/bin/ffmpeg");
+  const ffmpeg = Boolean(ffmpegBin());
   const ck = await cookieStatus();
   return {
     ytdlp,
@@ -149,11 +145,20 @@ async function runYtDlp(
   }
   const py = pythonBin();
   const args = ["-u", bin, ...baseArgs(cookieFile), ...extraArgs];
+  const env = { ...withRuntimePath(), PYTHONUNBUFFERED: "1" };
+  const useFrozen = /\.exe$/i.test(bin);
   return new Promise((resolve, reject) => {
-    const child = spawn(py, args, {
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = useFrozen
+      ? spawn(bin, [...baseArgs(cookieFile), ...extraArgs], {
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        })
+      : spawn(py, args, {
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
     let stdout = "";
     let stderr = "";
     const carryErr = { buf: "" };

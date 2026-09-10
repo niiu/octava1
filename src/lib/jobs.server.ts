@@ -12,6 +12,7 @@ import type { AudioFormat, DownloadJob, Mp3Quality } from "./media";
 import { DEFAULT_MP3_QUALITY, extensionFor, mimeFor, newId, safeFilename } from "./media";
 import { dumpLogText, getDownloadProgress } from "./yt-log.server";
 import { pythonBin } from "./python.server";
+import { withRuntimePath } from "./runtime-path";
 
 type JobInternal = DownloadJob & { filePath?: string; duration?: number | null };
 
@@ -426,7 +427,7 @@ function packZipWithPython(
           "    sys.stdout.write(json.dumps({'i':i,'n':n,'name':e['name']})+'\\n')\n" +
           "    sys.stdout.flush()\n",
       ],
-      { stdio: ["pipe", "pipe", "pipe"] },
+      { stdio: ["pipe", "pipe", "pipe"], env: withRuntimePath(), windowsHide: true },
     );
     let err = "";
     let out = "";
