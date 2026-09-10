@@ -1,6 +1,8 @@
 ﻿param(
   [Parameter(Position = 0)]
-  [string]$Command = "help"
+  [string]$Command = "help",
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]]$Rest
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +11,7 @@ $Root = if ($env:OCTAVA_HOME) { $env:OCTAVA_HOME } else { (Resolve-Path (Join-Pa
 $RunDir = Join-Path $Root ".run"
 $PidFile = Join-Path $RunDir "octava.pid"
 $PortFile = Join-Path $RunDir "octava.port"
+$WantedPortFile = Join-Path $RunDir "octava.wanted-port"
 $LogFile = Join-Path $RunDir "octava.log"
 $ErrFile = Join-Path $RunDir "octava.err.log"
 $TaskName = "Octava"
@@ -43,12 +46,63 @@ function Read-Pid {
   return $null
 }
 
+function Parse-PortArg {
+  if (-not $Rest) { return 0 }
+  for ($i = 0; $i -lt $Rest.Count; $i++) {
+    $item = [string]$Rest[$i]
+    if ($item -match '^(--port|-p)$' -and ($i + 1) -lt $Rest.Count) {
+      $n = 0
+      if ([int]::TryParse([string]$Rest[$i + 1], [ref]$n) -and $n -gt 0 -and $n -lt 65536) { return $n }
+    }
+    if ($item -match '^--port=(\d+)$') {
+      $n = [int]$Matches[1]
+      if ($n -gt 0 -and $n -lt 65536) { return $n }
+    }
+    if ($item -match '^\d+$') {
+      $n = [int]$item
+      if ($n -gt 0 -and $n -lt 65536) { return $n }
+    }
+  }
+  return 0
+}
+
+function Read-WantedPort {
+  if (-not (Test-Path $WantedPortFile)) { return 0 }
+  $raw = (Get-Content $WantedPortFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+  $n = 0
+  if ([int]::TryParse("$raw", [ref]$n) -and $n -gt 0 -and $n -lt 65536) { return $n }
+  return 0
+}
+
+function Save-WantedPort([int]$Port) {
+  New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
+  Set-Content -Path $WantedPortFile -Value "$Port" -Encoding ASCII
+}
+
+function Apply-PortEnv {
+  $n = Parse-PortArg
+  if ($n -le 0) { $n = Read-WantedPort }
+  if ($n -le 0 -and $env:OCTAVA_PORT) {
+    $tmp = 0
+    if ([int]::TryParse("$($env:OCTAVA_PORT)", [ref]$tmp) -and $tmp -gt 0) { $n = $tmp }
+  }
+  if ($n -gt 0) {
+    Save-WantedPort $n
+    $env:OCTAVA_PORT = "$n"
+    $env:OCTAVA_PORT_STRICT = "1"
+    return $n
+  }
+  return 0
+}
+
 function Read-Port {
   if (Test-Path $PortFile) {
     $raw = (Get-Content $PortFile -ErrorAction SilentlyContinue | Select-Object -First 1)
     $n = 0
     if ([int]::TryParse("$raw", [ref]$n) -and $n -gt 0) { return $n }
   }
+  $wanted = Read-WantedPort
+  if ($wanted -gt 0) { return $wanted }
   if ($env:OCTAVA_PORT) { return $env:OCTAVA_PORT }
   return 8080
 }
@@ -81,11 +135,19 @@ function Use-Env {
 function Cmd-Start {
   Need-Root
   Use-Env
+  $wanted = Apply-PortEnv
   $alive = Read-Pid
   if (Pid-Alive $alive) {
-    Say "уже работает (pid $alive)"
-    Say "http://127.0.0.1:$(Read-Port)/"
-    return
+    $current = 0
+    [void][int]::TryParse("$(Read-Port)", [ref]$current)
+    if ($wanted -gt 0 -and $current -ne $wanted) {
+      Say "меняю порт $current -> $wanted"
+      Cmd-Stop
+    } else {
+      Say "уже работает (pid $alive)"
+      Say "http://127.0.0.1:$(Read-Port)/"
+      return
+    }
   }
   New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
   $node = Get-Node
@@ -96,6 +158,8 @@ function Cmd-Start {
     "set NODE_ENV=production",
     "set OCTAVA_HOME=$Root",
     "set OCTAVA_HOST=$($env:OCTAVA_HOST)",
+    "set OCTAVA_PORT=$($env:OCTAVA_PORT)",
+    "set OCTAVA_PORT_STRICT=$($env:OCTAVA_PORT_STRICT)",
     "set PATH=$($env:PATH)",
     "set YT_DLP_PATH=$($env:YT_DLP_PATH)",
     "set OCTAVA_PYTHON=$($env:OCTAVA_PYTHON)",
@@ -224,15 +288,17 @@ function Cmd-Help {
   @"
 Octava — служба загрузчика YouTube (Windows)
 
-  octava.cmd start      запустить в фоне
+  octava.cmd start 8787     запустить на порту 8787
+  octava.cmd start --port 8787
   octava.cmd stop       остановить
-  octava.cmd restart    перезапустить
+  octava.cmd restart 8787   перезапустить на порту
   octava.cmd status     состояние
   octava.cmd logs       журнал
-  octava.cmd enable     автозапуск при входе в Windows + старт
+  octava.cmd enable 8787    автозапуск + этот порт
   octava.cmd disable    выключить автозапуск и остановить
 
-Слушает первый свободный порт (сначала 8080).
+Порт из команды запоминается в .run\octava.wanted-port.
+Llama на 8080: octava.cmd start 8787
 OCTAVA_PORT / OCTAVA_HOST можно задать в окружении.
 "@ | Write-Host
 }

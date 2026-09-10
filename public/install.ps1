@@ -7,7 +7,8 @@
 [CmdletBinding()]
 param(
   [switch]$Foreground,
-  [switch]$Help
+  [switch]$Help,
+  [int]$Port = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +17,7 @@ $ErrorActionPreference = "Stop"
 if ($Help) {
   Write-Host "install.ps1              зависимости (Node LTS, Python 3, ffmpeg, yt-dlp) + служба"
   Write-Host "install.ps1 -Foreground  запуск на переднем плане"
+  Write-Host "install.ps1 -Port 8787   сразу слушать этот порт"
   exit 0
 }
 
@@ -237,6 +239,12 @@ $env:PATH = "$(Join-Path $Root 'node_modules\.bin');$env:PATH"
 if ($LASTEXITCODE -ne 0) { throw "Сборка не удалась." }
 
 $cli = Join-Path $Root "bin\octava.cmd"
+if ($Port -gt 0) {
+  New-Item -ItemType Directory -Force -Path (Join-Path $Root ".run") | Out-Null
+  Set-Content -Path (Join-Path $Root ".run\octava.wanted-port") -Value "$Port" -Encoding ASCII
+  $env:OCTAVA_PORT = "$Port"
+  $env:OCTAVA_PORT_STRICT = "1"
+}
 if ($Foreground) {
   Say "Передний план. Остановка — Ctrl+C."
   Write-Host "Cookies YouTube: поле на главной или cookies.txt в $Root"

@@ -122,14 +122,15 @@ function InstallPage() {
             <li className="rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">
               <p className="font-medium">3. Управление службой</p>
               <pre className="mt-2 overflow-x-auto rounded-md bg-raised px-3 py-2 font-mono text-xs leading-relaxed">
-                {`.\\bin\\octava.cmd start
+                {`.\\bin\\octava.cmd start 8787
 .\\bin\\octava.cmd stop
 .\\bin\\octava.cmd status
 .\\bin\\octava.cmd logs
-.\\bin\\octava.cmd enable`}
+.\\bin\\octava.cmd enable 8787`}
               </pre>
               <p className="mt-2 text-muted">
-                Откройте адрес, который напишет установщик (свободный порт, если 8080 занят). Передний план:{" "}
+                Если 8080 занят llama, укажите порт:{" "}
+                <span className="font-mono text-fg">.\bin\octava.cmd start 8787</span>. Передний план:{" "}
                 <span className="font-mono text-fg">.\install.ps1 -Foreground</span>
               </p>
             </li>

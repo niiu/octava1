@@ -81,6 +81,11 @@ function canListen(port) {
 
 async function pickPort() {
   const preferred = Number.parseInt(process.env.OCTAVA_PORT || "8080", 10);
+  const strict = process.env.OCTAVA_PORT_STRICT === "1" || process.env.OCTAVA_PORT_STRICT === "true";
+  if (strict && Number.isInteger(preferred) && preferred > 0 && preferred < 65536) {
+    bootLog(`forced port ${preferred}`);
+    return preferred;
+  }
   const list = [preferred, 8088, 8787, 8888, 3000, 3001, 9090, 4173];
   for (let n = preferred + 1; n <= preferred + 40; n++) list.push(n);
   const seen = new Set();
