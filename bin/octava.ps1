@@ -5,7 +5,7 @@
 
 $ErrorActionPreference = "Stop"
 $BinDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Root = if ($env:OCTAVA_HOME) { $env:OCTAVA_HOME } else { Resolve-Path (Join-Path $BinDir "..") }
+$Root = if ($env:OCTAVA_HOME) { $env:OCTAVA_HOME } else { (Resolve-Path (Join-Path $BinDir "..")).Path }
 $RunDir = Join-Path $Root ".run"
 $PidFile = Join-Path $RunDir "octava.pid"
 $PortFile = Join-Path $RunDir "octava.port"
@@ -89,23 +89,55 @@ function Cmd-Start {
   }
   New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
   $node = Get-Node
-  $proc = Start-Process -FilePath $node -ArgumentList @($Serve) -WorkingDirectory $Root `
-    -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile `
-    -WindowStyle Hidden -PassThru
+  $launch = Join-Path $RunDir "launch.cmd"
+  $lines = @(
+    "@echo off",
+    "cd /d `"$Root`"",
+    "set NODE_ENV=production",
+    "set OCTAVA_HOME=$Root",
+    "set OCTAVA_HOST=$($env:OCTAVA_HOST)",
+    "set PATH=$($env:PATH)",
+    "set YT_DLP_PATH=$($env:YT_DLP_PATH)",
+    "set OCTAVA_PYTHON=$($env:OCTAVA_PYTHON)",
+    "set FFMPEG_PATH=$($env:FFMPEG_PATH)",
+    "`"$node`" --trace-uncaught `"$Serve`" >> `"$LogFile`" 2>&1"
+  )
+  Set-Content -Path $launch -Value $lines -Encoding ASCII
+  $comspec = Join-Path $System32 "cmd.exe"
+  if (-not (Test-Path $comspec)) { $comspec = $env:ComSpec }
+  if (-not $comspec) { $comspec = "cmd.exe" }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $comspec
+  $psi.Arguments = "/c `"$launch`""
+  $psi.WorkingDirectory = "$Root"
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $proc = New-Object System.Diagnostics.Process
+  $proc.StartInfo = $psi
+  if (-not $proc.Start()) { Fail "не удалось создать процесс cmd" }
   Set-Content -Path $PidFile -Value $proc.Id -Encoding ASCII
-  $port = 8080
-  for ($i = 0; $i -lt 20; $i++) {
+  $port = $null
+  for ($i = 0; $i -lt 40; $i++) {
     Start-Sleep -Milliseconds 250
-    if (-not (Pid-Alive $proc.Id)) { break }
-    if (Test-Path $PortFile) { $port = Read-Port; break }
+    if (Test-Path $PortFile) {
+      $port = Read-Port
+      break
+    }
+    if ($i -gt 4 -and -not (Pid-Alive $proc.Id)) { break }
   }
-  if (Pid-Alive $proc.Id) {
+  if ((Pid-Alive $proc.Id) -or (Test-Path $PortFile)) {
+    if (-not $port) { $port = Read-Port }
     Say "запущена в фоне (pid $($proc.Id))"
     Say "http://127.0.0.1:$port/"
     Say "логи: $LogFile"
-  } else {
-    Fail "не удалось запустить, смотрите $LogFile и $ErrFile"
+    return
   }
+  $tail = ""
+  if (Test-Path $LogFile) {
+    $tail = (Get-Content $LogFile -ErrorAction SilentlyContinue | Select-Object -Last 40) -join "`n"
+  }
+  if ($tail) { Write-Host $tail }
+  Fail "не удалось запустить, смотрите $LogFile"
 }
 
 function Cmd-Stop {

@@ -1,11 +1,39 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const runDir = path.join(root, ".run");
+const logFile = path.join(runDir, "octava.log");
+
+function bootLog(message) {
+  const line = `${new Date().toISOString()} ${message}\n`;
+  try {
+    mkdirSync(runDir, { recursive: true });
+    appendFileSync(logFile, line);
+  } catch {
+    /* ignore */
+  }
+  try {
+    process.stderr.write(line);
+  } catch {
+    /* ignore */
+  }
+}
+
+process.on("uncaughtException", (err) => {
+  bootLog(`uncaught ${err && err.stack ? err.stack : err}`);
+  process.exit(1);
+});
+process.on("unhandledRejection", (err) => {
+  bootLog(`unhandled ${err && err.stack ? err.stack : err}`);
+  process.exit(1);
+});
+
+bootLog("boot");
 process.chdir(root);
 
 const win = process.platform === "win32";
@@ -64,40 +92,46 @@ async function pickPort() {
   throw new Error("Нет свободного TCP-порта для Octava.");
 }
 
-const port = String(await pickPort());
-process.env.OCTAVA_PORT = port;
-process.env.NITRO_HOST = process.env.OCTAVA_HOST;
-process.env.NITRO_PORT = port;
-process.env.HOST = process.env.OCTAVA_HOST;
-process.env.PORT = port;
+try {
+  const port = String(await pickPort());
+  process.env.OCTAVA_PORT = port;
+  process.env.NITRO_HOST = process.env.OCTAVA_HOST;
+  process.env.NITRO_PORT = port;
+  process.env.HOST = process.env.OCTAVA_HOST;
+  process.env.PORT = port;
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
+  bootLog(`listen http://127.0.0.1:${port}/`);
 
-const runDir = path.join(root, ".run");
-mkdirSync(runDir, { recursive: true });
-writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
-console.log(`Octava http://127.0.0.1:${port}/`);
+  const vercel = path.join(root, ".vercel", "output", "functions", "__server.func", "index.mjs");
+  const nitro = path.join(root, ".output", "server", "index.mjs");
+  const entry = existsSync(vercel) ? vercel : existsSync(nitro) ? nitro : null;
 
-const vercel = path.join(root, ".vercel", "output", "functions", "__server.func", "index.mjs");
-const nitro = path.join(root, ".output", "server", "index.mjs");
-const entry = existsSync(vercel) ? vercel : existsSync(nitro) ? nitro : null;
-
-if (entry) {
-  await import(pathToFileURL(entry).href);
-} else {
-  const child = spawn(
-    process.execPath,
-    [
-      path.join(root, "scripts", "with-app-env.mjs"),
-      "vite",
-      "preview",
-      "--host",
-      process.env.OCTAVA_HOST,
-      "--port",
-      port,
-    ],
-    { stdio: "inherit", cwd: root, env: process.env, windowsHide: false },
-  );
-  child.on("exit", (code, signal) => {
-    if (signal) process.kill(process.pid, signal);
-    process.exit(code ?? 1);
-  });
+  if (entry) {
+    bootLog(`nitro ${entry}`);
+    await import(pathToFileURL(entry).href);
+  } else {
+    bootLog("vite preview");
+    const child = spawn(
+      process.execPath,
+      [
+        path.join(root, "scripts", "with-app-env.mjs"),
+        "vite",
+        "preview",
+        "--host",
+        process.env.OCTAVA_HOST,
+        "--port",
+        port,
+      ],
+      { stdio: "inherit", cwd: root, env: process.env, windowsHide: false },
+    );
+    child.on("exit", (code, signal) => {
+      bootLog(`vite exit ${code ?? ""} ${signal ?? ""}`);
+      if (signal) process.kill(process.pid, signal);
+      process.exit(code ?? 1);
+    });
+  }
+} catch (err) {
+  bootLog(`fatal ${err && err.stack ? err.stack : err}`);
+  process.exit(1);
 }
