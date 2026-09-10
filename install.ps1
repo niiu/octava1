@@ -217,17 +217,23 @@ Write-Host "yt-dlp  $(& $env:YT_DLP_PATH --version 2>$null)"
 Write-Host "--------------"
 
 Say "npm install"
+Add-RuntimePath
+$env:PATH = "$(Join-Path $Root 'node_modules\.bin');$env:PATH"
+$npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
+if (-not $npm) { throw "npm не найден после установки Node.js" }
 if (Test-Path (Join-Path $Root "package-lock.json")) {
-  npm ci
-  if ($LASTEXITCODE -ne 0) { npm install }
+  & $npm.Source ci
+  if ($LASTEXITCODE -ne 0) { & $npm.Source install }
 } else {
-  npm install
+  & $npm.Source install
 }
 if ($LASTEXITCODE -ne 0) { throw "npm install не удался" }
 
 Say "Сборка production"
 $env:NODE_OPTIONS = "--max-old-space-size=4096"
-npm run build
+$env:PATH = "$(Join-Path $Root 'node_modules\.bin');$env:PATH"
+& $npm.Source run build
 if ($LASTEXITCODE -ne 0) { throw "Сборка не удалась." }
 
 $cli = Join-Path $Root "bin\octava.cmd"
