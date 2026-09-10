@@ -31,8 +31,9 @@ import {
   setProgressSink,
 } from "./yt-log.server";
 
-const MAX_PLAYLIST = 40;
+const MAX_PLAYLIST = 5_000;
 const JSON_TIMEOUT_MS = 45_000;
+const PLAYLIST_TIMEOUT_MS = 180_000;
 const LOCK_STALE_MS = 3 * 60_000;
 const LOCK_HEARTBEAT_MS = 15_000;
 
@@ -210,9 +211,13 @@ async function runYtDlp(
   });
 }
 
-async function runJson(args: string[], cookieFile?: string | null): Promise<YtEntry> {
+async function runJson(
+  args: string[],
+  cookieFile?: string | null,
+  timeoutMs: number = JSON_TIMEOUT_MS,
+): Promise<YtEntry> {
   try {
-    const proc = await runYtDlp(args, cookieFile ?? null, JSON_TIMEOUT_MS, true);
+    const proc = await runYtDlp(args, cookieFile ?? null, timeoutMs, true);
     if (proc.killed) {
       throw Object.assign(new Error("yt-dlp timeout"), {
         killed: true,
@@ -367,6 +372,9 @@ export async function resolveInput(raw: string, cookiesText?: string): Promise<R
       appendLog("ok", `ролик: ${result.track.title}`);
     } else if (result.kind === "playlist") {
       appendLog("ok", `плейлист «${result.title}» · ${result.tracks.length} треков`);
+      if (result.tracks.length >= MAX_PLAYLIST) {
+        appendLog("info", `показаны первые ${MAX_PLAYLIST}`);
+      }
     } else {
       appendLog("ok", `поиск «${result.query}» · ${result.tracks.length} результатов`);
     }
@@ -399,11 +407,13 @@ async function resolveWith(raw: string, cookieFile: string | null): Promise<Reso
         "-J",
         "--yes-playlist",
         "--flat-playlist",
+        "--ignore-errors",
         "--playlist-end",
         String(MAX_PLAYLIST),
         `https://www.youtube.com/playlist?list=${playlistId}`,
       ],
       cookieFile,
+      PLAYLIST_TIMEOUT_MS,
     );
     const tracks = (data.entries ?? []).map(asTrack).filter((t): t is Track => Boolean(t));
     if (tracks.length === 0 && parsed.kind === "video") {
