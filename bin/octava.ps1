@@ -140,12 +140,12 @@ function Test-Listen([int]$Port) {
     $iar = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
     $wait = $iar.AsyncWaitHandle.WaitOne(400, $false)
     if ($wait -and $client.Connected) { return $true }
+    return $false
   } catch {
     return $false
   } finally {
-    if ($client) { try { $client.Close() } catch {} }
+    if ($client -ne $null) { $client.Close() }
   }
-  return $false
 }
 
 function Dump-Log {
@@ -154,6 +154,8 @@ function Dump-Log {
     if ($tail) { Write-Host ($tail -join "`n") }
   }
 }
+
+function Cmd-Start {
   Need-Root
   Use-Env
   $wanted = Apply-PortEnv
