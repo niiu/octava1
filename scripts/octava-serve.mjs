@@ -66,7 +66,7 @@ const ffmpeg = [
 if (ffmpeg) process.env.FFMPEG_PATH ||= ffmpeg;
 
 process.env.OCTAVA_HOME = root;
-process.env.OCTAVA_HOST ||= "0.0.0.0";
+process.env.OCTAVA_HOST ||= win ? "127.0.0.1" : "0.0.0.0";
 process.env.NODE_ENV = "production";
 
 function canListen(port) {
@@ -97,6 +97,25 @@ async function pickPort() {
   throw new Error("Нет свободного TCP-порта для Octava.");
 }
 
+function waitForHttp(port) {
+  const nport = Number(port);
+  return new Promise((resolve, reject) => {
+    let tries = 0;
+    const tick = () => {
+      const socket = net.connect({ port: nport, host: "127.0.0.1" }, () => {
+        socket.end();
+        resolve();
+      });
+      socket.on("error", () => {
+        tries += 1;
+        if (tries > 80) reject(new Error(`порт ${port} не открылся`));
+        else setTimeout(tick, 150);
+      });
+    };
+    tick();
+  });
+}
+
 try {
   const port = String(await pickPort());
   process.env.OCTAVA_PORT = port;
@@ -105,8 +124,7 @@ try {
   process.env.HOST = process.env.OCTAVA_HOST;
   process.env.PORT = port;
   mkdirSync(runDir, { recursive: true });
-  writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
-  bootLog(`listen http://127.0.0.1:${port}/`);
+  bootLog(`binding ${process.env.OCTAVA_HOST}:${port}`);
 
   const vercel = path.join(root, ".vercel", "output", "functions", "__server.func", "index.mjs");
   const nitro = path.join(root, ".output", "server", "index.mjs");
@@ -115,6 +133,9 @@ try {
   if (entry) {
     bootLog(`nitro ${entry}`);
     await import(pathToFileURL(entry).href);
+    await waitForHttp(port);
+    writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
+    bootLog(`listen http://127.0.0.1:${port}/`);
   } else {
     bootLog("vite preview");
     const child = spawn(
@@ -135,6 +156,9 @@ try {
       if (signal) process.kill(process.pid, signal);
       process.exit(code ?? 1);
     });
+    await waitForHttp(port);
+    writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
+    bootLog(`listen http://127.0.0.1:${port}/`);
   }
 } catch (err) {
   bootLog(`fatal ${err && err.stack ? err.stack : err}`);

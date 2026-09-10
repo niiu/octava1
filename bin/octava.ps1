@@ -128,11 +128,32 @@ function Use-Env {
   $py = Join-Path $Root ".runtime\python\python.exe"
   if (Test-Path $py) { $env:OCTAVA_PYTHON = $py }
   $env:OCTAVA_HOME = "$Root"
-  if (-not $env:OCTAVA_HOST) { $env:OCTAVA_HOST = "0.0.0.0" }
+  if (-not $env:OCTAVA_HOST) { $env:OCTAVA_HOST = "127.0.0.1" }
   $env:NODE_ENV = "production"
 }
 
-function Cmd-Start {
+function Test-Listen([int]$Port) {
+  if ($Port -le 0) { return $false }
+  $client = $null
+  try {
+    $client = New-Object System.Net.Sockets.TcpClient
+    $iar = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+    $wait = $iar.AsyncWaitHandle.WaitOne(400, $false)
+    if ($wait -and $client.Connected) { return $true }
+  } catch {
+    return $false
+  } finally {
+    if ($client) { try { $client.Close() } catch {} }
+  }
+  return $false
+}
+
+function Dump-Log {
+  if (Test-Path $LogFile) {
+    $tail = Get-Content $LogFile -ErrorAction SilentlyContinue | Select-Object -Last 40
+    if ($tail) { Write-Host ($tail -join "`n") }
+  }
+}
   Need-Root
   Use-Env
   $wanted = Apply-PortEnv
@@ -160,8 +181,6 @@ function Cmd-Start {
     "set OCTAVA_HOST=$($env:OCTAVA_HOST)",
     "set OCTAVA_PORT=$($env:OCTAVA_PORT)",
     "set OCTAVA_PORT_STRICT=$($env:OCTAVA_PORT_STRICT)",
-    "set PATH=$($env:PATH)",
-    "set YT_DLP_PATH=$($env:YT_DLP_PATH)",
     "set OCTAVA_PYTHON=$($env:OCTAVA_PYTHON)",
     "set FFMPEG_PATH=$($env:FFMPEG_PATH)",
     "`"$node`" --trace-uncaught `"$Serve`" >> `"$LogFile`" 2>&1"
@@ -180,27 +199,30 @@ function Cmd-Start {
   $proc.StartInfo = $psi
   if (-not $proc.Start()) { Fail "не удалось создать процесс cmd" }
   Set-Content -Path $PidFile -Value $proc.Id -Encoding ASCII
-  $port = $null
-  for ($i = 0; $i -lt 40; $i++) {
+  $portWanted = 0
+  [void][int]::TryParse("$($env:OCTAVA_PORT)", [ref]$portWanted)
+  if ($portWanted -le 0) { $portWanted = Read-WantedPort }
+  $ready = $false
+  $port = $portWanted
+  for ($i = 0; $i -lt 80; $i++) {
     Start-Sleep -Milliseconds 250
-    if (Test-Path $PortFile) {
-      $port = Read-Port
+    $aliveNow = Pid-Alive $proc.Id
+    $probe = $portWanted
+    if (Test-Path $PortFile) { $probe = Read-Port }
+    if ($probe -gt 0 -and (Test-Listen ([int]$probe)) -and $aliveNow) {
+      $port = $probe
+      $ready = $true
       break
     }
-    if ($i -gt 4 -and -not (Pid-Alive $proc.Id)) { break }
+    if (-not $aliveNow -and $i -gt 6) { break }
   }
-  if ((Pid-Alive $proc.Id) -or (Test-Path $PortFile)) {
-    if (-not $port) { $port = Read-Port }
+  if ($ready) {
     Say "запущена в фоне (pid $($proc.Id))"
     Say "http://127.0.0.1:$port/"
     Say "логи: $LogFile"
     return
   }
-  $tail = ""
-  if (Test-Path $LogFile) {
-    $tail = (Get-Content $LogFile -ErrorAction SilentlyContinue | Select-Object -Last 40) -join "`n"
-  }
-  if ($tail) { Write-Host $tail }
+  Dump-Log
   Fail "не удалось запустить, смотрите $LogFile"
 }
 
@@ -221,9 +243,12 @@ function Cmd-Stop {
 
 function Cmd-Status {
   $procId = Read-Pid
-  if (Pid-Alive $procId) {
+  $port = Read-Port
+  $listen = $false
+  if ($port) { $listen = Test-Listen ([int]$port) }
+  if ((Pid-Alive $procId) -or $listen) {
     Say "active pid $procId"
-    Say "http://127.0.0.1:$(Read-Port)/"
+    Say "http://127.0.0.1:$port/"
     Say "log $LogFile"
   } else {
     Say "inactive"
@@ -259,7 +284,7 @@ function Cmd-Enable {
     $ps = Join-Path $WinDir "System32\WindowsPowerShell\v1.0\powershell.exe"
     if (-not (Test-Path $ps)) { $ps = "powershell.exe" }
     $tr = "`"$ps`" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$BinDir\octava.ps1`" start"
-    & $SchTasks /Create /TN $TaskName /TR $tr /SC ONLOGON /RL LIMITED /F | Out-Null
+    $null = cmd.exe /c "`"$SchTasks`" /Create /TN $TaskName /TR $tr /SC ONLOGON /RL LIMITED /F >nul 2>&1"
     if ($LASTEXITCODE -eq 0) { $ok = $true }
   }
   if (-not $ok) {

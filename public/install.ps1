@@ -254,8 +254,17 @@ if ($Foreground) {
 }
 
 Say "Служба в фоне"
+$enableExit = 0
 & $cli enable
+if ($LASTEXITCODE) { $enableExit = $LASTEXITCODE }
 & $cli status
+if ($LASTEXITCODE -eq 3) {
+  Write-Host ""
+  Write-Host "Сервер не слушает. Хвост лога:"
+  $log = Join-Path $Root ".run\octava.log"
+  if (Test-Path $log) { Get-Content $log -Tail 50 }
+  throw "Octava не поднялась. Смотрите .run\octava.log"
+}
 
 $portFile = Join-Path $Root ".run\octava.port"
 $port = "8080"
