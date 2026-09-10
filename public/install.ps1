@@ -249,6 +249,9 @@ Say "Служба в фоне"
 & $cli enable
 & $cli status
 
+$portFile = Join-Path $Root ".run\octava.port"
+$port = "8080"
+if (Test-Path $portFile) { $port = (Get-Content $portFile | Select-Object -First 1).Trim() }
 Write-Host ""
 Write-Host "Управление:"
 Write-Host "  .\bin\octava.cmd start"
@@ -257,6 +260,6 @@ Write-Host "  .\bin\octava.cmd status"
 Write-Host "  .\bin\octava.cmd logs"
 Write-Host "  .\bin\octava.cmd enable"
 Write-Host "Файл лога: $Root\.run\octava.log"
-Write-Host "Откройте http://127.0.0.1:8080/"
+Write-Host "Откройте http://127.0.0.1:$port/"
 Write-Host ""
 Write-Host "Cookies YouTube: поле на главной или cookies.txt в $Root"

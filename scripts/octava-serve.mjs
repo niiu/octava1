@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -38,12 +39,42 @@ if (ffmpeg) process.env.FFMPEG_PATH ||= ffmpeg;
 
 process.env.OCTAVA_HOME = root;
 process.env.OCTAVA_HOST ||= "0.0.0.0";
-process.env.OCTAVA_PORT ||= "8080";
 process.env.NODE_ENV = "production";
-process.env.NITRO_HOST ||= process.env.OCTAVA_HOST;
-process.env.NITRO_PORT ||= process.env.OCTAVA_PORT;
-process.env.HOST ||= process.env.OCTAVA_HOST;
-process.env.PORT ||= process.env.OCTAVA_PORT;
+
+function canListen(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.listen(port, "0.0.0.0", () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function pickPort() {
+  const preferred = Number.parseInt(process.env.OCTAVA_PORT || "8080", 10);
+  const list = [preferred, 8088, 8787, 8888, 3000, 3001, 9090, 4173];
+  for (let n = preferred + 1; n <= preferred + 40; n++) list.push(n);
+  const seen = new Set();
+  for (const port of list) {
+    if (!Number.isInteger(port) || port < 1 || port > 65535 || seen.has(port)) continue;
+    seen.add(port);
+    if (await canListen(port)) return port;
+  }
+  throw new Error("Нет свободного TCP-порта для Octava.");
+}
+
+const port = String(await pickPort());
+process.env.OCTAVA_PORT = port;
+process.env.NITRO_HOST = process.env.OCTAVA_HOST;
+process.env.NITRO_PORT = port;
+process.env.HOST = process.env.OCTAVA_HOST;
+process.env.PORT = port;
+
+const runDir = path.join(root, ".run");
+mkdirSync(runDir, { recursive: true });
+writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
+console.log(`Octava http://127.0.0.1:${port}/`);
 
 const vercel = path.join(root, ".vercel", "output", "functions", "__server.func", "index.mjs");
 const nitro = path.join(root, ".output", "server", "index.mjs");
@@ -61,7 +92,7 @@ if (entry) {
       "--host",
       process.env.OCTAVA_HOST,
       "--port",
-      process.env.OCTAVA_PORT,
+      port,
     ],
     { stdio: "inherit", cwd: root, env: process.env, windowsHide: false },
   );

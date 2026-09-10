@@ -129,7 +129,7 @@ function InstallPage() {
 .\\bin\\octava.cmd enable`}
               </pre>
               <p className="mt-2 text-muted">
-                Откройте http://127.0.0.1:8080/ . Передний план:{" "}
+                Откройте адрес, который напишет установщик (свободный порт, если 8080 занят). Передний план:{" "}
                 <span className="font-mono text-fg">.\install.ps1 -Foreground</span>
               </p>
             </li>

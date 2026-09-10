@@ -8,10 +8,15 @@ $BinDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = if ($env:OCTAVA_HOME) { $env:OCTAVA_HOME } else { Resolve-Path (Join-Path $BinDir "..") }
 $RunDir = Join-Path $Root ".run"
 $PidFile = Join-Path $RunDir "octava.pid"
+$PortFile = Join-Path $RunDir "octava.port"
 $LogFile = Join-Path $RunDir "octava.log"
 $ErrFile = Join-Path $RunDir "octava.err.log"
 $TaskName = "Octava"
 $Serve = Join-Path $Root "scripts\octava-serve.mjs"
+$WinDir = if ($env:WINDIR) { $env:WINDIR } else { "C:\Windows" }
+$System32 = Join-Path $WinDir "System32"
+$SchTasks = Join-Path $System32 "schtasks.exe"
+$TaskKill = Join-Path $System32 "taskkill.exe"
 
 function Say([string]$Text) { Write-Host $Text }
 function Fail([string]$Text) { Write-Error "octava: $Text"; exit 1 }
@@ -38,6 +43,16 @@ function Read-Pid {
   return $null
 }
 
+function Read-Port {
+  if (Test-Path $PortFile) {
+    $raw = (Get-Content $PortFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $n = 0
+    if ([int]::TryParse("$raw", [ref]$n) -and $n -gt 0) { return $n }
+  }
+  if ($env:OCTAVA_PORT) { return $env:OCTAVA_PORT }
+  return 8080
+}
+
 function Pid-Alive([Nullable[int]]$ProcId) {
   if (-not $ProcId) { return $false }
   return [bool](Get-Process -Id $ProcId -ErrorAction SilentlyContinue)
@@ -45,6 +60,7 @@ function Pid-Alive([Nullable[int]]$ProcId) {
 
 function Use-Env {
   $parts = @(
+    $System32,
     (Join-Path $Root ".runtime\node"),
     (Join-Path $Root ".runtime\ffmpeg\bin"),
     (Join-Path $Root ".runtime\ffmpeg"),
@@ -59,7 +75,6 @@ function Use-Env {
   if (Test-Path $py) { $env:OCTAVA_PYTHON = $py }
   $env:OCTAVA_HOME = "$Root"
   if (-not $env:OCTAVA_HOST) { $env:OCTAVA_HOST = "0.0.0.0" }
-  if (-not $env:OCTAVA_PORT) { $env:OCTAVA_PORT = "8080" }
   $env:NODE_ENV = "production"
 }
 
@@ -69,6 +84,7 @@ function Cmd-Start {
   $alive = Read-Pid
   if (Pid-Alive $alive) {
     Say "уже работает (pid $alive)"
+    Say "http://127.0.0.1:$(Read-Port)/"
     return
   }
   New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
@@ -77,10 +93,15 @@ function Cmd-Start {
     -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile `
     -WindowStyle Hidden -PassThru
   Set-Content -Path $PidFile -Value $proc.Id -Encoding ASCII
-  Start-Sleep -Milliseconds 500
+  $port = 8080
+  for ($i = 0; $i -lt 20; $i++) {
+    Start-Sleep -Milliseconds 250
+    if (-not (Pid-Alive $proc.Id)) { break }
+    if (Test-Path $PortFile) { $port = Read-Port; break }
+  }
   if (Pid-Alive $proc.Id) {
     Say "запущена в фоне (pid $($proc.Id))"
-    Say "http://127.0.0.1:$($env:OCTAVA_PORT)/"
+    Say "http://127.0.0.1:$port/"
     Say "логи: $LogFile"
   } else {
     Fail "не удалось запустить, смотрите $LogFile и $ErrFile"
@@ -90,7 +111,11 @@ function Cmd-Start {
 function Cmd-Stop {
   $procId = Read-Pid
   if (Pid-Alive $procId) {
-    & taskkill.exe /PID $procId /T /F 2>$null | Out-Null
+    if (Test-Path $TaskKill) {
+      & $TaskKill /PID $procId /T /F 2>$null | Out-Null
+    } else {
+      Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+    }
     Say "остановлена (pid $procId)"
   } else {
     Say "уже остановлена"
@@ -102,7 +127,7 @@ function Cmd-Status {
   $procId = Read-Pid
   if (Pid-Alive $procId) {
     Say "active pid $procId"
-    Say "http://127.0.0.1:$(if ($env:OCTAVA_PORT) { $env:OCTAVA_PORT } else { '8080' })/"
+    Say "http://127.0.0.1:$(Read-Port)/"
     Say "log $LogFile"
   } else {
     Say "inactive"
@@ -117,18 +142,49 @@ function Cmd-Logs {
   Get-Content -Path $LogFile, $ErrFile -ErrorAction SilentlyContinue -Tail 80 -Wait
 }
 
+function Register-StartupShortcut {
+  $startup = [Environment]::GetFolderPath("Startup")
+  if (-not $startup) { return $false }
+  $lnk = Join-Path $startup "Octava.lnk"
+  $shell = New-Object -ComObject WScript.Shell
+  $sc = $shell.CreateShortcut($lnk)
+  $sc.TargetPath = (Join-Path $WinDir "System32\WindowsPowerShell\v1.0\powershell.exe")
+  if (-not (Test-Path $sc.TargetPath)) { $sc.TargetPath = "powershell.exe" }
+  $sc.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$BinDir\octava.ps1`" start"
+  $sc.WorkingDirectory = "$Root"
+  $sc.Save()
+  return (Test-Path $lnk)
+}
+
 function Cmd-Enable {
   Need-Root
-  $cmd = "powershell.exe"
-  $args = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$BinDir\octava.ps1`" start"
-  schtasks.exe /Create /TN $TaskName /TR "$cmd $args" /SC ONLOGON /RL LIMITED /F | Out-Null
-  Say "автозапуск включён (планировщик задач: $TaskName)"
+  $ok = $false
+  if (Test-Path $SchTasks) {
+    $ps = Join-Path $WinDir "System32\WindowsPowerShell\v1.0\powershell.exe"
+    if (-not (Test-Path $ps)) { $ps = "powershell.exe" }
+    $tr = "`"$ps`" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$BinDir\octava.ps1`" start"
+    & $SchTasks /Create /TN $TaskName /TR $tr /SC ONLOGON /RL LIMITED /F | Out-Null
+    if ($LASTEXITCODE -eq 0) { $ok = $true }
+  }
+  if (-not $ok) {
+    try { $ok = Register-StartupShortcut } catch { $ok = $false }
+    if ($ok) { Say "автозапуск: ярлык в папке Автозагрузка" }
+    else { Say "автозапуск не записался — запускайте octava.cmd start вручную" }
+  } else {
+    Say "автозапуск включён (планировщик задач: $TaskName)"
+  }
   Cmd-Start
 }
 
 function Cmd-Disable {
   Cmd-Stop
-  schtasks.exe /Delete /TN $TaskName /F 2>$null | Out-Null
+  if (Test-Path $SchTasks) {
+    & $SchTasks /Delete /TN $TaskName /F 2>$null | Out-Null
+  }
+  $startup = [Environment]::GetFolderPath("Startup")
+  if ($startup) {
+    Remove-Item (Join-Path $startup "Octava.lnk") -ErrorAction SilentlyContinue
+  }
   Say "автозапуск выключен"
 }
 
@@ -144,7 +200,7 @@ Octava — служба загрузчика YouTube (Windows)
   octava.cmd enable     автозапуск при входе в Windows + старт
   octava.cmd disable    выключить автозапуск и остановить
 
-После установки слушает порт 8080.
+Слушает первый свободный порт (сначала 8080).
 OCTAVA_PORT / OCTAVA_HOST можно задать в окружении.
 "@ | Write-Host
 }
