@@ -114,9 +114,11 @@ function InstallPage() {
                 powershell -ExecutionPolicy Bypass -File .\install.ps1
               </pre>
               <p className="mt-2 text-muted">
-                Скрипт поставит портативный Node.js LTS, Python 3.12, ffmpeg и yt-dlp.exe в{" "}
-                <span className="font-mono text-fg">.runtime\</span>, соберёт production и запустит
-                службу (автозапуск при входе в Windows). Админские права обычно не нужны.
+                Скрипт спросит порт (по умолчанию 8787 — 8080 часто занят llama), поставит
+                портативный Node.js LTS, Python 3.12, ffmpeg и yt-dlp.exe в{" "}
+                <span className="font-mono text-fg">.runtime\</span>, соберёт production и
+                запустит службу. Можно сразу:{" "}
+                <span className="font-mono text-fg">.\install.ps1 -Port 8787</span>
               </p>
             </li>
             <li className="rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">
@@ -129,8 +131,8 @@ function InstallPage() {
 .\\bin\\octava.cmd enable 8787`}
               </pre>
               <p className="mt-2 text-muted">
-                Если 8080 занят llama, укажите порт:{" "}
-                <span className="font-mono text-fg">.\bin\octava.cmd start 8787</span>. Передний план:{" "}
+                Порт задаётся при установке и запоминается. Сменить:{" "}
+                <span className="font-mono text-fg">.\bin\octava.cmd start 9090</span>. Передний план:{" "}
                 <span className="font-mono text-fg">.\install.ps1 -Foreground</span>
               </p>
             </li>

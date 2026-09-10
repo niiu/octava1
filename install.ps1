@@ -2,6 +2,7 @@
 # Ставит Node.js LTS, Python 3.11+, ffmpeg, yt-dlp и поднимает службу.
 # Запуск из корня проекта:
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1
+#   powershell -ExecutionPolicy Bypass -File .\install.ps1 -Port 8787
 # Передний план:
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1 -Foreground
 [CmdletBinding()]
@@ -15,9 +16,9 @@ $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 if ($Help) {
-  Write-Host "install.ps1              зависимости (Node LTS, Python 3, ffmpeg, yt-dlp) + служба"
+  Write-Host "install.ps1              спросит порт и поставит зависимости + службу"
+  Write-Host "install.ps1 -Port 8787   без вопроса, сразу этот порт"
   Write-Host "install.ps1 -Foreground  запуск на переднем плане"
-  Write-Host "install.ps1 -Port 8787   сразу слушать этот порт"
   exit 0
 }
 
@@ -25,6 +26,35 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 $Runtime = Join-Path $Root ".runtime"
 New-Item -ItemType Directory -Force -Path $Runtime, (Join-Path $Root "bin") | Out-Null
+
+function Ask-ListenPort {
+  if ($script:Port -gt 0) { return $script:Port }
+  $saved = 0
+  $wantedFile = Join-Path $Root ".run\octava.wanted-port"
+  if (Test-Path $wantedFile) {
+    [void][int]::TryParse(("$(Get-Content $wantedFile | Select-Object -First 1)").Trim(), [ref]$saved)
+  }
+  $hint = 8787
+  if ($saved -gt 0) { $hint = $saved }
+  Write-Host ""
+  Write-Host "На каком порту слушать Octava?"
+  Write-Host "8080 часто занят (llama и другие сервисы). Пустой ввод = $hint"
+  $raw = ""
+  try { $raw = Read-Host "Порт" } catch { $raw = "" }
+  if ([string]::IsNullOrWhiteSpace($raw)) { return $hint }
+  $n = 0
+  if (-not [int]::TryParse($raw.Trim(), [ref]$n) -or $n -lt 1 -or $n -gt 65535) {
+    throw "Нужен порт от 1 до 65535, получено: $raw"
+  }
+  return $n
+}
+
+$Port = Ask-ListenPort
+New-Item -ItemType Directory -Force -Path (Join-Path $Root ".run") | Out-Null
+Set-Content -Path (Join-Path $Root ".run\octava.wanted-port") -Value "$Port" -Encoding ASCII
+$env:OCTAVA_PORT = "$Port"
+$env:OCTAVA_PORT_STRICT = "1"
+Write-Host "порт Octava: $Port"
 
 function Say([string]$Text) { Write-Host ""; Write-Host "==> $Text" }
 function Have-Cmd([string]$Name) { [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
@@ -245,12 +275,6 @@ if (-not (Test-Path $nodeServer) -and -not (Test-Path $vercelServer)) {
 }
 
 $cli = Join-Path $Root "bin\octava.cmd"
-if ($Port -gt 0) {
-  New-Item -ItemType Directory -Force -Path (Join-Path $Root ".run") | Out-Null
-  Set-Content -Path (Join-Path $Root ".run\octava.wanted-port") -Value "$Port" -Encoding ASCII
-  $env:OCTAVA_PORT = "$Port"
-  $env:OCTAVA_PORT_STRICT = "1"
-}
 if ($Foreground) {
   Say "Передний план. Остановка — Ctrl+C."
   Write-Host "Cookies YouTube: поле на главной или cookies.txt в $Root"
@@ -260,9 +284,7 @@ if ($Foreground) {
 }
 
 Say "Служба в фоне"
-$enableExit = 0
-& $cli enable
-if ($LASTEXITCODE) { $enableExit = $LASTEXITCODE }
+& $cli enable $Port
 & $cli status
 if ($LASTEXITCODE -eq 3) {
   Write-Host ""
@@ -273,8 +295,8 @@ if ($LASTEXITCODE -eq 3) {
 }
 
 $portFile = Join-Path $Root ".run\octava.port"
-$port = "8080"
-if (Test-Path $portFile) { $port = (Get-Content $portFile | Select-Object -First 1).Trim() }
+$shown = "$Port"
+if (Test-Path $portFile) { $shown = (Get-Content $portFile | Select-Object -First 1).Trim() }
 Write-Host ""
 Write-Host "Управление:"
 Write-Host "  .\bin\octava.cmd start"
@@ -283,6 +305,6 @@ Write-Host "  .\bin\octava.cmd status"
 Write-Host "  .\bin\octava.cmd logs"
 Write-Host "  .\bin\octava.cmd enable"
 Write-Host "Файл лога: $Root\.run\octava.log"
-Write-Host "Откройте http://127.0.0.1:$port/"
+Write-Host "Откройте http://127.0.0.1:$shown/"
 Write-Host ""
 Write-Host "Cookies YouTube: поле на главной или cookies.txt в $Root"
