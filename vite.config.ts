@@ -150,13 +150,10 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
-    ...(process.env.OCTAVA_HMR === "0"
-      ? { hmr: false as const, watch: null }
-      : {}),
   },
   preview: {
-    host: process.env.OCTAVA_PROD === "1" ? "0.0.0.0" : "127.0.0.1",
-    port: process.env.OCTAVA_PROD === "1" ? Number(process.env.OCTAVA_PORT || 8080) : 8081,
+    host: "127.0.0.1",
+    port: 8081,
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },
@@ -173,7 +170,7 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: "vercel",
+            preset: process.env.NITRO_PRESET || "vercel",
             // Auto-registers server/middleware/* (the PWA install page +
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.

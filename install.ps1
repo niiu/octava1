@@ -234,9 +234,15 @@ if ($LASTEXITCODE -ne 0) { throw "npm install не удался" }
 
 Say "Сборка production"
 $env:NODE_OPTIONS = "--max-old-space-size=4096"
+$env:NITRO_PRESET = "node"
 $env:PATH = "$(Join-Path $Root 'node_modules\.bin');$env:PATH"
 & $npm.Source run build
 if ($LASTEXITCODE -ne 0) { throw "Сборка не удалась." }
+$nodeServer = Join-Path $Root ".output\server\index.mjs"
+$vercelServer = Join-Path $Root ".vercel\output\functions\__server.func\index.mjs"
+if (-not (Test-Path $nodeServer) -and -not (Test-Path $vercelServer)) {
+  throw "Сборка не создала сервер. Повторите npm run build."
+}
 
 $cli = Join-Path $Root "bin\octava.cmd"
 if ($Port -gt 0) {

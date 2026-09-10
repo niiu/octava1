@@ -291,13 +291,14 @@ else
 fi
 
 say "Сборка production (без Vite — страница не тянет .tsx по сети)"
+export NITRO_PRESET="${NITRO_PRESET:-node}"
 if ! npm run build; then
   echo "Сборка не удалась. На слабом сервере попробуйте:"
   echo "  NODE_OPTIONS=--max-old-space-size=2048 npm run build"
   exit 1
 fi
-if [ ! -d "$ROOT/.vercel/output/static" ] || [ ! -f "$ROOT/.vercel/output/functions/__server.func/index.mjs" ]; then
-  echo "Сборка не создала .vercel/output. Повторите npm run build."
+if [ ! -f "$ROOT/.output/server/index.mjs" ] && [ ! -f "$ROOT/.vercel/output/functions/__server.func/index.mjs" ]; then
+  echo "Сборка не создала сервер (.output/server или .vercel/output). Повторите npm run build."
   exit 1
 fi
 

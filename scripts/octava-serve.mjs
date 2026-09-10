@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -116,26 +117,44 @@ function waitForHttp(port) {
   });
 }
 
+function listenHandler(handler, port, host) {
+  return new Promise((resolve, reject) => {
+    const server = createServer((req, res) => {
+      Promise.resolve(handler(req, res)).catch((err) => {
+        bootLog(`handler ${err && err.stack ? err.stack : err}`);
+        if (!res.headersSent) res.writeHead(500);
+        res.end();
+      });
+    });
+    server.on("error", reject);
+    server.listen(Number(port), host, () => resolve(server));
+  });
+}
+
 try {
   const port = String(await pickPort());
+  const host = process.env.OCTAVA_HOST;
   process.env.OCTAVA_PORT = port;
-  process.env.NITRO_HOST = process.env.OCTAVA_HOST;
+  process.env.NITRO_HOST = host;
   process.env.NITRO_PORT = port;
-  process.env.HOST = process.env.OCTAVA_HOST;
+  process.env.HOST = host;
   process.env.PORT = port;
   mkdirSync(runDir, { recursive: true });
-  bootLog(`binding ${process.env.OCTAVA_HOST}:${port}`);
+  bootLog(`binding ${host}:${port}`);
 
+  const nodeEntry = path.join(root, ".output", "server", "index.mjs");
   const vercel = path.join(root, ".vercel", "output", "functions", "__server.func", "index.mjs");
-  const nitro = path.join(root, ".output", "server", "index.mjs");
-  const entry = existsSync(vercel) ? vercel : existsSync(nitro) ? nitro : null;
 
-  if (entry) {
-    bootLog(`nitro ${entry}`);
-    await import(pathToFileURL(entry).href);
-    await waitForHttp(port);
-    writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
-    bootLog(`listen http://127.0.0.1:${port}/`);
+  if (existsSync(nodeEntry)) {
+    bootLog(`nitro node ${nodeEntry}`);
+    await import(pathToFileURL(nodeEntry).href);
+  } else if (existsSync(vercel)) {
+    bootLog(`nitro vercel-wrap ${vercel}`);
+    const mod = await import(pathToFileURL(vercel).href);
+    if (typeof mod.default !== "function") {
+      throw new Error("Сборка Vercel не слушает порт. Пересоберите: NITRO_PRESET=node npm run build");
+    }
+    await listenHandler(mod.default, port, host);
   } else {
     bootLog("vite preview");
     const child = spawn(
@@ -145,7 +164,7 @@ try {
         "vite",
         "preview",
         "--host",
-        process.env.OCTAVA_HOST,
+        host,
         "--port",
         port,
       ],
@@ -156,10 +175,11 @@ try {
       if (signal) process.kill(process.pid, signal);
       process.exit(code ?? 1);
     });
-    await waitForHttp(port);
-    writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
-    bootLog(`listen http://127.0.0.1:${port}/`);
   }
+
+  await waitForHttp(port);
+  writeFileSync(path.join(runDir, "octava.port"), port, "utf8");
+  bootLog(`listen http://127.0.0.1:${port}/`);
 } catch (err) {
   bootLog(`fatal ${err && err.stack ? err.stack : err}`);
   process.exit(1);
