@@ -8,6 +8,7 @@ import {
 } from "@/lib/jobs.server";
 import type { AudioFormat } from "@/lib/media";
 import { parseMp3Quality } from "@/lib/media";
+import { instanceFromRequest } from "@/lib/instance.server";
 
 const FORMATS = new Set<AudioFormat>(["m4a", "mp3", "source"]);
 
@@ -21,18 +22,19 @@ export const Route = createFileRoute("/api/job")({
     handlers: {
       GET: async ({ request }) => {
         const url = new URL(request.url);
+        const instanceId = instanceFromRequest(request);
         const id = url.searchParams.get("id") ?? "";
         if (url.searchParams.get("download") && id) {
-          return streamJobFile(id);
+          return streamJobFile(id, instanceId);
         }
         if (id) {
-          const job = await getJob(id);
+          const job = await getJob(id, instanceId);
           if (!job) {
             return Response.json({ code: "NOT_FOUND", message: "Нет такого задания" }, { status: 404 });
           }
           return Response.json({ job });
         }
-        return Response.json({ jobs: await listJobs() });
+        return Response.json({ jobs: await listJobs(instanceId) });
       },
       POST: async ({ request }) => {
         try {
@@ -44,7 +46,9 @@ export const Route = createFileRoute("/api/job")({
             quality?: unknown;
             cookies?: unknown;
             duration?: unknown;
+            instance?: unknown;
           };
+          const instanceId = instanceFromRequest(request, body.instance);
           const videoId =
             typeof body.videoId === "string"
               ? body.videoId
@@ -64,6 +68,7 @@ export const Route = createFileRoute("/api/job")({
             quality: parseMp3Quality(body.quality),
             cookies: typeof body.cookies === "string" ? body.cookies : undefined,
             duration: typeof body.duration === "number" && Number.isFinite(body.duration) ? body.duration : null,
+            instanceId,
           });
           return Response.json({ job });
         } catch (err) {
@@ -78,11 +83,12 @@ export const Route = createFileRoute("/api/job")({
       },
       DELETE: async ({ request }) => {
         const url = new URL(request.url);
+        const instanceId = instanceFromRequest(request);
         const id = url.searchParams.get("id") ?? "";
         if (!id) {
           return Response.json({ code: "BAD_ID", message: "Нет id задания" }, { status: 400 });
         }
-        const job = await cancelJob(id);
+        const job = await cancelJob(id, instanceId);
         if (!job) {
           return Response.json({ code: "NOT_FOUND", message: "Нет такого задания" }, { status: 404 });
         }

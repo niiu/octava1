@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronDown, Copy, Terminal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { clearExtractorLog, getExtractorLog } from "@/lib/media.functions";
+import { getExtractorLog, clearExtractorLog } from "@/lib/media.functions";
+import { getInstanceId } from "@/lib/instance";
 import type { YtLogLevel } from "@/lib/media";
 import {
   clearYtLogLocal,
@@ -44,7 +45,7 @@ export function YtConsole({ busy = false }: Props) {
   async function onClear() {
     clearYtLogLocal();
     try {
-      await clearExtractorLog();
+      await clearExtractorLog({ data: { instance: getInstanceId() } });
     } catch {
       /* local already empty */
     }
@@ -214,7 +215,9 @@ export function useYtLogPoll(active = false) {
     let alive = true;
     async function tick() {
       try {
-        const next = await getExtractorLog({ data: { after: serverCursor() } });
+        const next = await getExtractorLog({
+          data: { after: serverCursor(), instance: getInstanceId() },
+        });
         if (!alive) return;
         mergeYtServer(next?.lines, next?.boot);
         setYtDownloadRatio(next?.progress, next?.epoch);

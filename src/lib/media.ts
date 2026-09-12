@@ -50,6 +50,7 @@ export type YtLogLine = {
   t: number;
   level: YtLogLevel;
   text: string;
+  instanceId?: string;
 };
 
 export type ExtractorCaps = {

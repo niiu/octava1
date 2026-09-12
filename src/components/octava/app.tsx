@@ -29,12 +29,14 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Wordmark } from "@/components/octava/logo";
 import { CookiesPanel } from "@/components/octava/cookies-panel";
+import { InstancePanel } from "@/components/octava/instance-panel";
 import { YtConsole } from "@/components/octava/console";
 import { getBlob, getBlobUrl, hasBlob } from "@/lib/blobs";
 import { DownloadError, ensureServerJob } from "@/lib/download-client";
 import { cancelJob, fetchJobFile, jobDownloadUrl, listJobs, prepareJobsZip, startBrowserDownload, startJob, waitForJob, zipFileUrl } from "@/lib/jobs-client";
 import { getExtractorCaps, resolveMedia } from "@/lib/media.functions";
 import { cookiePayload, loadStoredCookies } from "@/lib/cookies-client";
+import { getInstanceId } from "@/lib/instance";
 import { countCookieRows } from "@/lib/cookie-file";
 import { ingestYtText, noteYt, resetYtDownloadRatio, setYtDownloadRatio } from "@/lib/yt-log-client";
 import type { AudioFormat, DownloadJob, ExtractorCaps, LocalPlaylist, Mp3Quality, Track } from "@/lib/media";
@@ -308,7 +310,9 @@ export function OctavaApp() {
     setBusy(true);
     noteYt("info", `запрос: ${q}`);
     try {
-      const out = await resolveMedia({ data: { input: q, cookies: cookiePayload(cookies) } });
+      const out = await resolveMedia({
+        data: { input: q, cookies: cookiePayload(cookies), instance: getInstanceId() },
+      });
       ingestYtText(out.log);
       if (!out.ok) {
         noteYt("error", out.message);
@@ -668,6 +672,7 @@ export function OctavaApp() {
           <Wordmark />
         </Link>
         <nav className="flex items-center gap-1">
+          <InstancePanel />
           <Link
             to="/install"
             className="inline-flex h-11 items-center rounded-md px-3 text-sm text-muted hover:bg-raised hover:text-fg"

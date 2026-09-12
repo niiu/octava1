@@ -6,11 +6,17 @@ import {
   exportFromBrowser,
   saveCookieFile,
 } from "./cookie-store.server";
-import { clearLog, dumpLogText, getDownloadProgress, getLogBoot, getProgressEpoch, listLog } from "./yt-log.server";
+import { clearLog, dumpLogText, getLogBoot, getProgressEpoch, listLog, progressForInstance } from "./yt-log.server";
+import { normalizeInstanceId, runWithInstance } from "./instance.server";
 
 const inputSchema = z.object({
-  input: z.string().trim().min(1, "Вставьте ссылку или запрос").max(500),
+  input: z.string().trim().min(1, "Вставьте ссылку или поисковый запрос").max(500),
   cookies: z.string().max(200_000).optional(),
+  instance: z.string().max(48).optional(),
+});
+
+const instanceSchema = z.object({
+  instance: z.string().max(48).optional(),
 });
 
 export const getExtractorCaps = createServerFn({ method: "GET" }).handler(
@@ -18,43 +24,54 @@ export const getExtractorCaps = createServerFn({ method: "GET" }).handler(
 );
 
 export const getExtractorLog = createServerFn({ method: "POST" })
-  .validator(z.object({ after: z.coerce.number().int().nonnegative().optional() }))
-  .handler(async ({ data }) => ({
-    lines: listLog(data.after ?? 0),
-    progress: getDownloadProgress(),
-    epoch: getProgressEpoch(),
-    boot: getLogBoot(),
-  }));
+  .validator(
+    z.object({
+      after: z.coerce.number().int().nonnegative().optional(),
+      instance: z.string().max(48).optional(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const instanceId = normalizeInstanceId(data.instance);
+    return {
+      lines: listLog(data.after ?? 0, instanceId),
+      progress: progressForInstance(instanceId),
+      epoch: getProgressEpoch(),
+      boot: getLogBoot(),
+    };
+  });
 
-export const clearExtractorLog = createServerFn({ method: "POST" }).handler(
-  async () => {
-    clearLog();
+export const clearExtractorLog = createServerFn({ method: "POST" })
+  .validator(instanceSchema)
+  .handler(async ({ data }) => {
+    clearLog(normalizeInstanceId(data.instance));
     return { ok: true as const };
-  },
-);
+  });
 
 export const resolveMedia = createServerFn({ method: "POST" })
   .validator(inputSchema)
   .handler(async ({ data }) => {
-    try {
-      const result = await resolveInput(data.input, data.cookies);
-      return { ok: true as const, result, log: dumpLogText(24) };
-    } catch (err) {
-      if (err instanceof ExtractorError) {
+    const instanceId = normalizeInstanceId(data.instance);
+    return runWithInstance(instanceId, async () => {
+      try {
+        const result = await resolveInput(data.input, data.cookies);
+        return { ok: true as const, result, log: dumpLogText(24, instanceId) };
+      } catch (err) {
+        if (err instanceof ExtractorError) {
+          return {
+            ok: false as const,
+            message: err.message,
+            code: err.code,
+            log: err.log || dumpLogText(40, instanceId),
+          };
+        }
         return {
           ok: false as const,
-          message: err.message,
-          code: err.code,
-          log: err.log || dumpLogText(40),
+          message: err instanceof Error ? err.message : "Не удалось разобрать ссылку.",
+          code: "EXTRACT",
+          log: dumpLogText(40, instanceId),
         };
       }
-      return {
-        ok: false as const,
-        message: err instanceof Error ? err.message : "Не удалось разобрать ссылку.",
-        code: "EXTRACT",
-        log: dumpLogText(40),
-      };
-    }
+    });
   });
 
 export const saveYoutubeCookies = createServerFn({ method: "POST" })

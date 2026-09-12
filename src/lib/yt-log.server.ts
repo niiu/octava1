@@ -1,4 +1,5 @@
 import type { YtLogLevel, YtLogLine } from "./media";
+import { currentInstance } from "./instance.server";
 
 const MAX_LINES = 180;
 const MAX_LINE = 500;
@@ -20,9 +21,10 @@ type YtLogRt = {
   lastConsolePct: number;
   lastConsoleKind: string;
   lastConsoleAt: number;
+  ownerInstance: string;
 };
 
-const LOG_VER = 2;
+const LOG_VER = 3;
 
 function rt(): YtLogRt {
   const g = globalThis as typeof globalThis & { __octavaYtLog?: YtLogRt };
@@ -42,6 +44,7 @@ function rt(): YtLogRt {
       lastConsolePct: -1,
       lastConsoleKind: "",
       lastConsoleAt: 0,
+      ownerInstance: "",
     };
   }
   return g.__octavaYtLog;
@@ -254,10 +257,26 @@ function emitProgress(ratio: number): void {
   s.sink?.(s.lastProgress);
 }
 
+function lineInstance(): string {
+  const fromAls = currentInstance();
+  if (fromAls && fromAls !== "anon") return fromAls;
+  return rt().ownerInstance || fromAls || "anon";
+}
+
+export function setLogOwner(instanceId: string): void {
+  rt().ownerInstance = instanceId || "";
+}
+
 function pushLine(level: YtLogLevel, text: string): void {
   const s = rt();
   s.seq += 1;
-  s.lines.push({ id: s.seq, t: Date.now(), level, text: text.slice(0, MAX_LINE) });
+  s.lines.push({
+    id: s.seq,
+    t: Date.now(),
+    level,
+    text: text.slice(0, MAX_LINE),
+    instanceId: lineInstance(),
+  });
   if (s.lines.length > MAX_LINES) s.lines.splice(0, s.lines.length - MAX_LINES);
 }
 
@@ -388,24 +407,40 @@ export function flushLogCarry(carry: { buf: string }): void {
   if (text) appendLog(classify(text), text);
 }
 
-export function listLog(after = 0): YtLogLine[] {
+export function listLog(after = 0, instanceId?: string): YtLogLine[] {
   const s = rt();
-  const lines = s.lines;
-  if (after <= 0) return lines.slice();
-  if (after > s.seq) return lines.slice(-80);
-  return lines.filter((line) => line.id > after);
+  const mine = instanceId
+    ? s.lines.filter((line) => (line.instanceId || "anon") === instanceId)
+    : s.lines.slice();
+  if (after <= 0) return mine.slice();
+  if (after > s.seq) return mine.slice(-80);
+  return mine.filter((line) => line.id > after);
 }
 
-export function dumpLogText(limit = 40): string {
-  return rt()
-    .lines.slice(-limit)
+export function dumpLogText(limit = 40, instanceId?: string): string {
+  const lines = instanceId
+    ? rt().lines.filter((line) => (line.instanceId || "anon") === instanceId)
+    : rt().lines;
+  return lines
+    .slice(-limit)
     .map((line) => line.text)
     .join("\n");
 }
 
-export function clearLog(): void {
+export function clearLog(instanceId?: string): void {
   const s = rt();
-  s.lines.length = 0;
-  s.currentTitle = "";
-  resetDownloadProgress();
+  if (!instanceId) {
+    s.lines.length = 0;
+  } else {
+    s.lines = s.lines.filter((line) => (line.instanceId || "anon") !== instanceId);
+  }
+  if (!instanceId || s.ownerInstance === instanceId) {
+    s.currentTitle = "";
+    resetDownloadProgress();
+  }
+}
+
+export function progressForInstance(instanceId: string): number {
+  if (!instanceId || rt().ownerInstance !== instanceId) return 0;
+  return rt().lastProgress || 0;
 }

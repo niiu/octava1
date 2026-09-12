@@ -10,11 +10,16 @@ import {
 } from "./extractor.server";
 import type { AudioFormat, DownloadJob, Mp3Quality } from "./media";
 import { DEFAULT_MP3_QUALITY, extensionFor, mimeFor, newId, safeFilename } from "./media";
-import { dumpLogText, getDownloadProgress } from "./yt-log.server";
+import { dumpLogText, getDownloadProgress, setLogOwner } from "./yt-log.server";
 import { pythonBin } from "./python.server";
 import { withRuntimePath } from "./runtime-path";
+import { ANON_INSTANCE, runWithInstance } from "./instance.server";
 
-type JobInternal = DownloadJob & { filePath?: string; duration?: number | null };
+type JobInternal = DownloadJob & {
+  filePath?: string;
+  duration?: number | null;
+  instanceId?: string;
+};
 
 type JobsRt = {
   jobs: Map<string, JobInternal>;
@@ -42,7 +47,8 @@ function rt(): JobsRt {
   return g.__octavaJobsRt;
 }
 
-const MAX_JOBS = 40;
+const MAX_JOBS = 240;
+const MAX_JOBS_PER_INSTANCE = 48;
 const jobs = rt().jobs;
 const cookiesByJob = rt().cookiesByJob;
 const controllers = rt().controllers;
@@ -140,14 +146,20 @@ function reuseKey(videoId: string, format: AudioFormat, quality: Mp3Quality): st
   return `${videoId}::${format}::${quality}`;
 }
 
+function owns(job: JobInternal, instanceId: string): boolean {
+  return (job.instanceId || ANON_INSTANCE) === instanceId;
+}
+
 function findReusable(
   videoId: string,
   format: AudioFormat,
   quality: Mp3Quality,
+  instanceId: string,
 ): JobInternal | undefined {
   const key = reuseKey(videoId, format, quality);
   let best: JobInternal | undefined;
   for (const job of jobs.values()) {
+    if (!owns(job, instanceId)) continue;
     if (reuseKey(job.videoId, job.format, job.quality) !== key) continue;
     if (job.status === "running" || job.status === "queued") return job;
     if (job.status === "done" && job.filePath && existsSync(job.filePath)) best = job;
@@ -156,10 +168,34 @@ function findReusable(
 }
 
 async function prune(): Promise<void> {
-  if (jobs.size <= MAX_JOBS) return;
-  const idle = [...jobs.values()]
-    .filter((j) => j.status === "done" || j.status === "error" || j.status === "cancelled")
-    .sort((a, b) => a.updatedAt - b.updatedAt);
+  const idleOf = (list: JobInternal[]) =>
+    list
+      .filter((j) => j.status === "done" || j.status === "error" || j.status === "cancelled")
+      .sort((a, b) => a.updatedAt - b.updatedAt);
+
+  const grouped = new Map<string, JobInternal[]>();
+  for (const job of jobs.values()) {
+    const key = job.instanceId || ANON_INSTANCE;
+    const bucket = grouped.get(key);
+    if (bucket) bucket.push(job);
+    else grouped.set(key, [job]);
+  }
+  for (const group of grouped.values()) {
+    const idle = idleOf(group);
+    while (group.length > MAX_JOBS_PER_INSTANCE && idle.length > 0) {
+      const old = idle.shift();
+      if (!old) break;
+      if (old.filePath) await unlink(old.filePath).catch(() => undefined);
+      jobs.delete(old.jobId);
+      const idx = group.indexOf(old);
+      if (idx >= 0) group.splice(idx, 1);
+    }
+  }
+  if (jobs.size <= MAX_JOBS) {
+    schedulePersist();
+    return;
+  }
+  const idle = idleOf([...jobs.values()]);
   while (jobs.size > MAX_JOBS && idle.length > 0) {
     const old = idle.shift();
     if (!old) break;
@@ -172,71 +208,78 @@ async function prune(): Promise<void> {
 async function runJob(jobId: string): Promise<void> {
   const job = jobs.get(jobId);
   if (!job) return;
-  const ac = controllers.get(jobId);
-  patch(jobId, { status: "running", progress: 0.03 });
-  const tick = setInterval(() => {
-    const current = jobs.get(jobId);
-    if (!current || current.status !== "running") return;
-    const latest = Math.max(current.progress, getDownloadProgress() || 0);
-    if (latest > current.progress) patch(jobId, { progress: latest });
-  }, 350);
-  try {
-    const file = await extractAudio(
-      job.videoId,
-      job.format,
-      cookiesByJob.get(jobId),
-      job.quality,
-      ac?.signal,
-      (ratio) => {
-        const current = jobs.get(jobId);
-        if (!current || current.status !== "running") return;
-        if (ratio > current.progress) patch(jobId, { progress: ratio });
-      },
-      { title: job.title, duration: job.duration },
-    );
-    const ext = path.extname(file.path) || `.${extensionFor(job.format, file.mime)}`;
-    const dest = path.join(rt().jobsDir, `${job.jobId}${ext}`);
-    await copyFile(file.path, dest);
-    const info = await stat(dest);
-    await file.cleanup().catch(() => undefined);
-    const filename = `${safeFilename(job.title)}.${ext.replace(/^\./, "")}`;
-    patch(jobId, {
-      status: "done",
-      progress: 1,
-      filePath: dest,
-      filename,
-      mime: file.mime || mimeFor(job.format),
-      bytes: info.size,
-    });
-  } catch (err) {
-    if (ac?.signal.aborted) {
-      patch(jobId, { status: "cancelled", error: "отменено", progress: 0 });
-      return;
+  const instanceId = job.instanceId || ANON_INSTANCE;
+  await runWithInstance(instanceId, async () => {
+    setLogOwner(instanceId);
+    const ac = controllers.get(jobId);
+    patch(jobId, { status: "running", progress: 0.03 });
+    const tick = setInterval(() => {
+      const current = jobs.get(jobId);
+      if (!current || current.status !== "running") return;
+      const latest = Math.max(current.progress, getDownloadProgress() || 0);
+      if (latest > current.progress) patch(jobId, { progress: latest });
+    }, 350);
+    try {
+      const file = await extractAudio(
+        job.videoId,
+        job.format,
+        cookiesByJob.get(jobId),
+        job.quality,
+        ac?.signal,
+        (ratio) => {
+          const current = jobs.get(jobId);
+          if (!current || current.status !== "running") return;
+          if (ratio > current.progress) patch(jobId, { progress: ratio });
+        },
+        { title: job.title, duration: job.duration },
+      );
+      const ext = path.extname(file.path) || `.${extensionFor(job.format, file.mime)}`;
+      const dest = path.join(rt().jobsDir, `${job.jobId}${ext}`);
+      await copyFile(file.path, dest);
+      const info = await stat(dest);
+      await file.cleanup().catch(() => undefined);
+      const filename = `${safeFilename(job.title)}.${ext.replace(/^\./, "")}`;
+      patch(jobId, {
+        status: "done",
+        progress: 1,
+        filePath: dest,
+        filename,
+        mime: file.mime || mimeFor(job.format),
+        bytes: info.size,
+      });
+    } catch (err) {
+      if (ac?.signal.aborted) {
+        patch(jobId, { status: "cancelled", error: "отменено", progress: 0 });
+        return;
+      }
+      const mapped = err instanceof ExtractorError ? err : null;
+      patch(jobId, {
+        status: "error",
+        error: mapped?.message || (err instanceof Error ? err.message : "не скачался"),
+      });
+    } finally {
+      clearInterval(tick);
+      cookiesByJob.delete(jobId);
+      controllers.delete(jobId);
+      setLogOwner("");
+      await prune();
     }
-    const mapped = err instanceof ExtractorError ? err : null;
-    patch(jobId, {
-      status: "error",
-      error: mapped?.message || (err instanceof Error ? err.message : "не скачался"),
-    });
-  } finally {
-    clearInterval(tick);
-    cookiesByJob.delete(jobId);
-    controllers.delete(jobId);
-    await prune();
-  }
+  });
 }
 
-export async function listJobs(): Promise<DownloadJob[]> {
+export async function listJobs(instanceId: string): Promise<DownloadJob[]> {
   await ensureLoaded();
   return [...jobs.values()]
+    .filter((job) => owns(job, instanceId))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .map(publicJob);
 }
 
-export async function getJob(jobId: string): Promise<DownloadJob | null> {
+export async function getJob(jobId: string, instanceId: string): Promise<DownloadJob | null> {
   await ensureLoaded();
   const job = jobs.get(jobId);
-  return job ? publicJob(job) : null;
+  if (!job || !owns(job, instanceId)) return null;
+  return publicJob(job);
 }
 
 export async function startJob(input: {
@@ -246,10 +289,12 @@ export async function startJob(input: {
   quality?: Mp3Quality;
   cookies?: string;
   duration?: number | null;
+  instanceId: string;
 }): Promise<DownloadJob> {
   await ensureLoaded();
   const quality = input.quality ?? DEFAULT_MP3_QUALITY;
-  const existing = findReusable(input.videoId, input.format, quality);
+  const instanceId = input.instanceId || ANON_INSTANCE;
+  const existing = findReusable(input.videoId, input.format, quality, instanceId);
   if (existing) {
     if (input.cookies?.trim() && existing.status === "queued") {
       cookiesByJob.set(existing.jobId, input.cookies);
@@ -269,6 +314,7 @@ export async function startJob(input: {
     status: "queued",
     progress: 0,
     duration: input.duration ?? null,
+    instanceId,
     createdAt: now,
     updatedAt: now,
   };
@@ -300,10 +346,10 @@ async function pumpQueue(): Promise<void> {
   }
 }
 
-export async function cancelJob(jobId: string): Promise<DownloadJob | null> {
+export async function cancelJob(jobId: string, instanceId: string): Promise<DownloadJob | null> {
   await ensureLoaded();
   const job = jobs.get(jobId);
-  if (!job) return null;
+  if (!job || !owns(job, instanceId)) return null;
   if (job.status === "done") return publicJob(job);
   controllers.get(jobId)?.abort();
   controllers.delete(jobId);
@@ -312,10 +358,10 @@ export async function cancelJob(jobId: string): Promise<DownloadJob | null> {
   return publicJob(jobs.get(jobId)!);
 }
 
-export async function streamJobFile(jobId: string): Promise<Response> {
+export async function streamJobFile(jobId: string, instanceId: string): Promise<Response> {
   await ensureLoaded();
   const job = jobs.get(jobId);
-  if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) {
+  if (!job || !owns(job, instanceId) || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) {
     return Response.json({ code: "NOT_FOUND", message: "Файл ещё не готов." }, { status: 404 });
   }
   return streamSavedFile(
@@ -490,13 +536,16 @@ function publicPack(pack: ZipPackInternal): ZipPackPublic {
   };
 }
 
-function collectZipEntries(jobIds: string[]): Array<{ path: string; name: string; size: number }> {
+function collectZipEntries(
+  jobIds: string[],
+  instanceId: string,
+): Array<{ path: string; name: string; size: number }> {
   const entries: Array<{ path: string; name: string; size: number }> = [];
   const used = new Set<string>();
   let packed = 0;
   for (const id of jobIds) {
     const job = jobs.get(id);
-    if (!job || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
+    if (!job || !owns(job, instanceId) || job.status !== "done" || !job.filePath || !existsSync(job.filePath)) continue;
     const info = (() => {
       try {
         return statSync(job.filePath);
@@ -521,10 +570,11 @@ function collectZipEntries(jobIds: string[]): Array<{ path: string; name: string
 export async function startZipPack(
   jobIds: string[],
   zipName = "octava.zip",
+  instanceId = ANON_INSTANCE,
 ): Promise<ZipPackPublic | Response> {
   await ensureLoaded();
   await pruneZips();
-  const entries = collectZipEntries(jobIds);
+  const entries = collectZipEntries(jobIds, instanceId);
   if (entries.length === 0) {
     return Response.json(
       { code: "EMPTY", message: "Нет готовых файлов для архива. Скачайте треки ещё раз." },
@@ -623,8 +673,9 @@ export async function getZipPack(packId: string): Promise<ZipPackPublic | null> 
 export async function buildJobsZip(
   jobIds: string[],
   zipName = "octava.zip",
+  instanceId = ANON_INSTANCE,
 ): Promise<{ id: string; filename: string; bytes: number; reused?: boolean } | Response> {
-  const started = await startZipPack(jobIds, zipName);
+  const started = await startZipPack(jobIds, zipName, instanceId);
   if (started instanceof Response) return started;
   if (started.status === "done" && started.zip) return started.zip;
   const deadline = Date.now() + 30 * 60_000;
@@ -649,8 +700,12 @@ export async function streamPackedZip(id: string): Promise<Response> {
   return streamSavedFile(bundle.path, bundle.filename, "application/zip");
 }
 
-export async function streamJobsZip(jobIds: string[], zipName = "octava.zip"): Promise<Response> {
-  const built = await buildJobsZip(jobIds, zipName);
+export async function streamJobsZip(
+  jobIds: string[],
+  zipName = "octava.zip",
+  instanceId = ANON_INSTANCE,
+): Promise<Response> {
+  const built = await buildJobsZip(jobIds, zipName, instanceId);
   if (built instanceof Response) return built;
   return streamPackedZip(built.id);
 }

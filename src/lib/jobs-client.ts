@@ -1,6 +1,7 @@
 import { setBlob } from "./blobs";
 import type { AudioFormat, DownloadJob, Mp3Quality } from "./media";
 import { DEFAULT_MP3_QUALITY } from "./media";
+import { instanceHeaders, getInstanceId } from "./instance";
 
 export class DownloadError extends Error {
   code: string;
@@ -30,7 +31,7 @@ export async function startJob(input: {
 }): Promise<DownloadJob> {
   const res = await fetch("/api/job", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: instanceHeaders({ "content-type": "application/json" }),
     cache: "no-store",
     body: JSON.stringify({
       videoId: input.videoId,
@@ -52,14 +53,17 @@ export async function startJob(input: {
 }
 
 export async function listJobs(): Promise<DownloadJob[]> {
-  const res = await fetch("/api/job", { cache: "no-store" });
+  const res = await fetch("/api/job", { cache: "no-store", headers: instanceHeaders() });
   if (!res.ok) return [];
   const body = await readJson(res);
   return Array.isArray(body.jobs) ? (body.jobs as DownloadJob[]) : [];
 }
 
 export async function getJob(jobId: string): Promise<DownloadJob> {
-  const res = await fetch(`/api/job?id=${encodeURIComponent(jobId)}`, { cache: "no-store" });
+  const res = await fetch(`/api/job?id=${encodeURIComponent(jobId)}`, {
+    cache: "no-store",
+    headers: instanceHeaders(),
+  });
   const body = await readJson(res);
   if (!res.ok || !body.job) {
     throw new DownloadError(
@@ -71,20 +75,24 @@ export async function getJob(jobId: string): Promise<DownloadJob> {
 }
 
 export async function cancelJob(jobId: string): Promise<void> {
-  await fetch(`/api/job?id=${encodeURIComponent(jobId)}`, { method: "DELETE", cache: "no-store" });
+  await fetch(`/api/job?id=${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+    cache: "no-store",
+    headers: instanceHeaders(),
+  });
 }
 
 export function jobDownloadUrl(jobId: string): string {
-  return `/api/job?id=${encodeURIComponent(jobId)}&download=1`;
+  return `/api/job?id=${encodeURIComponent(jobId)}&download=1&instance=${encodeURIComponent(getInstanceId())}`;
 }
 
 export function zipDownloadUrl(jobIds: string[], name = "octava"): string {
   const ids = jobIds.filter(Boolean).join(",");
-  return `/api/zip?ids=${encodeURIComponent(ids)}&name=${encodeURIComponent(name)}`;
+  return `/api/zip?ids=${encodeURIComponent(ids)}&name=${encodeURIComponent(name)}&instance=${encodeURIComponent(getInstanceId())}`;
 }
 
 export function zipFileUrl(fileId: string): string {
-  return `/api/zip?file=${encodeURIComponent(fileId)}`;
+  return `/api/zip?file=${encodeURIComponent(fileId)}&instance=${encodeURIComponent(getInstanceId())}`;
 }
 
 export type ZipPackState = {
@@ -110,7 +118,7 @@ export async function prepareJobsZip(
   }
   const res = await fetch("/api/zip", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: instanceHeaders({ "content-type": "application/json" }),
     cache: "no-store",
     signal,
     body: JSON.stringify({ ids, name }),
@@ -151,6 +159,7 @@ export async function prepareJobsZip(
     const poll = await fetch(`/api/zip?pack=${encodeURIComponent(pack.packId)}`, {
       cache: "no-store",
       signal,
+      headers: instanceHeaders(),
     });
     const nextBody = await readJson(poll);
     const next = nextBody.pack as ZipPackState | undefined;
@@ -199,7 +208,7 @@ export async function fetchJobFile(
     try {
       const res = await fetch(
         `/api/job?id=${encodeURIComponent(job.jobId)}&download=1&t=${Date.now()}`,
-        { cache: "no-store", signal },
+        { cache: "no-store", signal, headers: instanceHeaders() },
       );
       if (!res.ok) {
         const body = await readJson(res);
