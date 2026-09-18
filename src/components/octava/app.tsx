@@ -6,6 +6,7 @@ import {
   FolderPlus,
   History,
   ListMusic,
+  ListOrdered,
   LoaderCircle,
   Pause,
   Play,
@@ -50,6 +51,8 @@ import {
   formatDuration,
   safeFilename,
   extensionFor,
+  thumbFor,
+  watchUrl,
 } from "@/lib/media";
 import { saveBlob } from "@/lib/pack-zip";
 import { useLibrary } from "@/lib/store";
@@ -99,9 +102,9 @@ export function OctavaApp() {
   const [caps, setCaps] = useState<ExtractorCaps | null>(null);
   const [nowPlaying, setNowPlaying] = useState<Track | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [activePlaylistId, setActivePlaylistId] = useState<string | "inbox" | "history">(
-    "inbox",
-  );
+  const [activePlaylistId, setActivePlaylistId] = useState<
+    string | "inbox" | "history" | "queue"
+  >("inbox");
   const [newPlOpen, setNewPlOpen] = useState(false);
   const [newPlName, setNewPlName] = useState("");
   const [pendingAdd, setPendingAdd] = useState<string[] | null>(null);
@@ -110,6 +113,7 @@ export function OctavaApp() {
   const [incomingName, setIncomingName] = useState<string | null>(null);
   const [zip, setZip] = useState<ZipPhase>(ZIP_IDLE);
   const zipAbort = useRef<AbortController | null>(null);
+  const openedQueue = useRef(false);
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [fetchingId, setFetchingId] = useState<string | null>(null);
   const [ready, setReady] = useState<Record<string, boolean>>({});
@@ -123,6 +127,7 @@ export function OctavaApp() {
   const setMp3Quality = useLibrary((s) => s.setMp3Quality);
   const catalog = useLibrary((s) => s.catalog);
   const remember = useLibrary((s) => s.remember);
+  const putCatalog = useLibrary((s) => s.putCatalog);
   const playlists = useLibrary((s) => s.playlists);
   const selectedIds = useLibrary((s) => s.selectedIds);
   const toggleSelected = useLibrary((s) => s.toggleSelected);
@@ -217,6 +222,11 @@ export function OctavaApp() {
         const jobs = await listJobs();
         if (!alive) return;
         setServerJobs(jobs);
+        putCatalog(jobs.map((job) => trackFromJob(job)));
+        if (!openedQueue.current && jobs.some((j) => j.status === "queued" || j.status === "running")) {
+          openedQueue.current = true;
+          setActivePlaylistId("queue");
+        }
         setReady((prev) => {
           const next = { ...prev };
           let changed = false;
@@ -288,10 +298,13 @@ export function OctavaApp() {
     if (activePlaylistId === "history") {
       return historyIds.map((id) => catalog[id]).filter(Boolean);
     }
+    if (activePlaylistId === "queue") {
+      return queueTracksFromJobs(serverJobs, catalog);
+    }
     const pl = playlists.find((p) => p.id === activePlaylistId);
     if (!pl) return [];
     return pl.trackIds.map((id) => catalog[id]).filter(Boolean);
-  }, [activePlaylistId, inboxTracks, historyIds, catalog, playlists]);
+  }, [activePlaylistId, inboxTracks, historyIds, catalog, playlists, serverJobs]);
 
   const selectedVisible = visibleTracks.filter((t) => selectedIds.includes(t.id));
   const allVisibleSelected =
@@ -576,9 +589,11 @@ export function OctavaApp() {
     }));
     const stamp = new Date().toISOString().slice(0, 10);
     const collection =
-      result?.kind === "playlist"
-        ? result.title
-        : playlists.find((p) => p.id === activePlaylistId)?.name;
+      activePlaylistId === "queue"
+        ? "Очередь"
+        : result?.kind === "playlist"
+          ? result.title
+          : playlists.find((p) => p.id === activePlaylistId)?.name;
     const name = safeFilename(collection || "octava");
     const zipName = `${name}-${stamp}.zip`;
     try {
@@ -650,7 +665,9 @@ export function OctavaApp() {
   const heading =
     activePlaylistId === "history"
       ? "История"
-      : activePlaylistId === "inbox"
+      : activePlaylistId === "queue"
+        ? "Очередь инстанса"
+        : activePlaylistId === "inbox"
         ? result?.kind === "playlist"
           ? result.title
           : result?.kind === "search"
@@ -661,7 +678,11 @@ export function OctavaApp() {
         : playlists.find((p) => p.id === activePlaylistId)?.name ?? "Сборка";
 
   const sub =
-    activePlaylistId === "inbox" && result?.kind === "playlist"
+    activePlaylistId === "queue"
+      ? runningJobs.length > 0
+        ? `${runningJobs.filter((j) => j.status === "running").length} качается · ${runningJobs.filter((j) => j.status === "queued").length} в очереди`
+        : `${visibleTracks.length} заданий`
+      : activePlaylistId === "inbox" && result?.kind === "playlist"
       ? `${result.tracks.length} треков${result.channel ? ` · ${result.channel}` : ""}`
       : `${visibleTracks.length} записей`;
 
@@ -698,6 +719,21 @@ export function OctavaApp() {
             icon={<History className="size-4" />}
             label="История"
             hint={historyIds.length ? String(historyIds.length) : undefined}
+          />
+          <RailButton
+            active={activePlaylistId === "queue"}
+            onClick={() => setActivePlaylistId("queue")}
+            icon={<ListOrdered className="size-4" />}
+            label="Очередь"
+            hint={
+              serverJobs.length
+                ? String(
+                    runningJobs.length > 0
+                      ? runningJobs.length
+                      : serverJobs.filter((j) => j.status === "done").length,
+                  )
+                : undefined
+            }
           />
           <Separator className="my-1" />
           <div className="flex items-center justify-between">
@@ -853,7 +889,8 @@ export function OctavaApp() {
               />
               {typeof activePlaylistId === "string" &&
               activePlaylistId !== "inbox" &&
-              activePlaylistId !== "history" ? (
+              activePlaylistId !== "history" &&
+              activePlaylistId !== "queue" ? (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -983,7 +1020,17 @@ export function OctavaApp() {
           ) : null}
 
           {visibleTracks.length === 0 ? (
-            <EmptyState />
+            activePlaylistId === "queue" ? (
+              <div className="mt-16 flex flex-col items-start gap-3">
+                <p className="font-display text-2xl tracking-tight">Очередь пустая</p>
+                <p className="max-w-md text-sm text-muted">
+                  Задания этого инстанса появляются здесь. На другом устройстве вставьте тот же
+                  код — увидите ту же очередь, не ленту браузера.
+                </p>
+              </div>
+            ) : (
+              <EmptyState />
+            )
           ) : (
             <div className="mt-6">
               <div className="flex min-h-11 items-center gap-3 border-b border-line">
@@ -1041,7 +1088,9 @@ export function OctavaApp() {
                     toast.success(`«${track.title}» в сборке`);
                   }}
                   onRemove={
-                    activePlaylistId !== "inbox" && activePlaylistId !== "history"
+                    activePlaylistId !== "inbox" &&
+                    activePlaylistId !== "history" &&
+                    activePlaylistId !== "queue"
                       ? () => removeFromPlaylist(activePlaylistId, track.id)
                       : undefined
                   }
@@ -1285,6 +1334,40 @@ function EmptyState() {
       </p>
     </div>
   );
+}
+
+function trackFromJob(job: DownloadJob, catalog?: Record<string, Track>): Track {
+  const prev = catalog?.[job.videoId];
+  return {
+    id: job.videoId,
+    title: prev?.title || job.title || job.videoId,
+    channel: prev?.channel || "",
+    duration: prev?.duration ?? null,
+    thumbnail: prev?.thumbnail || thumbFor(job.videoId),
+    url: prev?.url || watchUrl(job.videoId),
+    filesize: job.bytes ?? prev?.filesize ?? null,
+  };
+}
+
+function queueTracksFromJobs(jobs: DownloadJob[], catalog: Record<string, Track>): Track[] {
+  const rank: Record<DownloadJob["status"], number> = {
+    running: 0,
+    queued: 1,
+    error: 2,
+    done: 3,
+    cancelled: 4,
+  };
+  const byVideo = new Map<string, DownloadJob>();
+  const ordered = [...jobs].sort((a, b) => {
+    const diff = rank[a.status] - rank[b.status];
+    if (diff) return diff;
+    return a.createdAt - b.createdAt;
+  });
+  for (const job of ordered) {
+    const prev = byVideo.get(job.videoId);
+    if (!prev || rank[job.status] < rank[prev.status]) byVideo.set(job.videoId, job);
+  }
+  return [...byVideo.values()].map((job) => trackFromJob(job, catalog));
 }
 
 function TrackRow({

@@ -17,6 +17,7 @@ type AppState = {
   setMp3Quality: (quality: Mp3Quality) => void;
   setInbox: (inbox: ResolveResult | null) => void;
   remember: (tracks: Track[]) => void;
+  putCatalog: (tracks: Track[]) => void;
   toggleSelected: (id: string) => void;
   setSelected: (ids: string[]) => void;
   clearSelected: () => void;
@@ -54,6 +55,39 @@ export const useLibrary = create<AppState>()(
           ...get().historyIds.filter((id) => !incoming.includes(id)),
         ].slice(0, MAX_HISTORY);
         set({ catalog, historyIds });
+      },
+      putCatalog: (tracks) => {
+        if (tracks.length === 0) return;
+        const catalog = { ...get().catalog };
+        let changed = false;
+        for (const track of tracks) {
+          const prev = catalog[track.id];
+          if (!prev) {
+            catalog[track.id] = track;
+            changed = true;
+            continue;
+          }
+          const next = {
+            ...prev,
+            title: prev.title && prev.title !== prev.id ? prev.title : track.title || prev.title,
+            channel: prev.channel || track.channel,
+            duration: prev.duration ?? track.duration,
+            thumbnail: prev.thumbnail || track.thumbnail,
+            url: prev.url || track.url,
+            filesize: track.filesize ?? prev.filesize,
+          };
+          if (
+            next.title !== prev.title ||
+            next.channel !== prev.channel ||
+            next.duration !== prev.duration ||
+            next.thumbnail !== prev.thumbnail ||
+            next.filesize !== prev.filesize
+          ) {
+            catalog[track.id] = next;
+            changed = true;
+          }
+        }
+        if (changed) set({ catalog });
       },
       toggleSelected: (id) => {
         const selectedIds = get().selectedIds;

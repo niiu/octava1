@@ -69,8 +69,8 @@ export function InstancePanel() {
           <DialogHeader>
             <DialogTitle>Инстанс очереди</DialogTitle>
             <DialogDescription>
-              Телефон и компьютер — разные инстансы, очереди не смешиваются. Чтобы видеть одни и
-              те же задания, вставьте код с другого устройства.
+              Телефон и компьютер — разные инстансы. Очередь заданий живёт на сервере: вставьте
+              код с другого устройства, чтобы видеть те же качающиеся и готовые файлы.
             </DialogDescription>
           </DialogHeader>
           <p className="text-xs font-medium tracking-wide text-subtle uppercase">Код этого устройства</p>
