@@ -918,14 +918,9 @@ export function OctavaApp() {
                 size="sm"
                 disabled={selectedVisible.length === 0}
                 onClick={() => {
+                  if (selectedVisible.length === 0) return;
                   setPendingAdd(selectedVisible.map((t) => t.id));
-                  if (playlists.length === 0) {
-                    setNewPlOpen(true);
-                    return;
-                  }
-                  const first = playlists[0]!;
-                  addToPlaylist(first.id, selectedVisible.map((t) => t.id));
-                  toast.success(`Добавлено в «${first.name}»`);
+                  setNewPlOpen(true);
                 }}
               >
                 <FolderPlus className="size-4" />
@@ -1079,13 +1074,8 @@ export function OctavaApp() {
                   onDownload={() => void downloadOne(track)}
                   onSave={() => saveTrackToDevice(track)}
                   onAdd={() => {
-                    if (playlists.length === 0) {
-                      setPendingAdd([track.id]);
-                      setNewPlOpen(true);
-                      return;
-                    }
-                    addToPlaylist(playlists[0]!.id, [track.id]);
-                    toast.success(`«${track.title}» в сборке`);
+                    setPendingAdd([track.id]);
+                    setNewPlOpen(true);
                   }}
                   onRemove={
                     activePlaylistId !== "inbox" &&
@@ -1129,12 +1119,43 @@ export function OctavaApp() {
         />
       ) : null}
 
-      <Dialog open={newPlOpen} onOpenChange={setNewPlOpen}>
+      <Dialog
+        open={newPlOpen}
+        onOpenChange={(open) => {
+          setNewPlOpen(open);
+          if (!open) setPendingAdd(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Новая сборка</DialogTitle>
-            <DialogDescription>Локальный плейлист — хранится в этом браузере.</DialogDescription>
+            <DialogTitle>{pendingAdd ? "В сборку" : "Новая сборка"}</DialogTitle>
+            <DialogDescription>
+              {pendingAdd
+                ? "Выберите существующую или создайте новую. Сборка хранится в этом браузере."
+                : "Локальный плейлист — хранится в этом браузере."}
+            </DialogDescription>
           </DialogHeader>
+          {pendingAdd && playlists.length > 0 ? (
+            <div className="mb-4 flex max-h-56 flex-col gap-2 overflow-auto">
+              {playlists.map((pl) => (
+                <Button
+                  key={pl.id}
+                  type="button"
+                  variant="secondary"
+                  className="justify-between"
+                  onClick={() => {
+                    addToPlaylist(pl.id, pendingAdd);
+                    setNewPlOpen(false);
+                    setPendingAdd(null);
+                    toast.success(`Добавлено в «${pl.name}»`);
+                  }}
+                >
+                  <span className="truncate">{pl.name}</span>
+                  <span className="shrink-0 font-mono text-xs text-subtle">{pl.trackIds.length}</span>
+                </Button>
+              ))}
+            </div>
+          ) : null}
           <form
             className="flex flex-col gap-3"
             onSubmit={(e) => {
@@ -1142,32 +1163,15 @@ export function OctavaApp() {
               submitNewPlaylist();
             }}
           >
+            {pendingAdd && playlists.length > 0 ? (
+              <p className="text-xs text-muted">или новая</p>
+            ) : null}
             <Input
               value={newPlName}
               onChange={(e) => setNewPlName(e.target.value)}
               placeholder="Дорога, ночь, архив…"
-              autoFocus
+              autoFocus={!pendingAdd || playlists.length === 0}
             />
-            {playlists.length > 0 && pendingAdd ? (
-              <div className="flex flex-col gap-2">
-                <p className="text-xs text-muted">или добавить в существующую</p>
-                {playlists.map((pl) => (
-                  <Button
-                    key={pl.id}
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      addToPlaylist(pl.id, pendingAdd);
-                      setNewPlOpen(false);
-                      setPendingAdd(null);
-                      toast.success(`Добавлено в «${pl.name}»`);
-                    }}
-                  >
-                    {pl.name}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
             <Button type="submit">Создать</Button>
           </form>
         </DialogContent>
