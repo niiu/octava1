@@ -43,6 +43,9 @@ import { ingestYtText, noteYt, resetYtDownloadRatio, setYtDownloadRatio } from "
 import type { AudioFormat, DownloadJob, ExtractorCaps, LocalPlaylist, Mp3Quality, Track } from "@/lib/media";
 import {
   FORMAT_LABEL,
+  TITLE_LANGS,
+  TITLE_LANG_LABEL,
+  parseTitleLang,
   MP3_QUALITIES,
   MP3_QUALITY_LABEL,
   DEFAULT_MP3_QUALITY,
@@ -124,6 +127,8 @@ export function OctavaApp() {
   const setFormat = useLibrary((s) => s.setFormat);
   const mp3Quality = useLibrary((s) => s.mp3Quality) ?? DEFAULT_MP3_QUALITY;
   const setMp3Quality = useLibrary((s) => s.setMp3Quality);
+  const titleLang = parseTitleLang(useLibrary((s) => s.titleLang));
+  const setTitleLang = useLibrary((s) => s.setTitleLang);
   const catalog = useLibrary((s) => s.catalog);
   const remember = useLibrary((s) => s.remember);
   const putCatalog = useLibrary((s) => s.putCatalog);
@@ -327,7 +332,12 @@ export function OctavaApp() {
     noteYt("info", `запрос: ${q}`);
     try {
       const out = await resolveMedia({
-        data: { input: q, cookies: cookiePayload(cookies), instance: getInstanceId() },
+        data: {
+          input: q,
+          cookies: cookiePayload(cookies),
+          instance: getInstanceId(),
+          lang: titleLang,
+        },
       });
       ingestYtText(out.log);
       if (!out.ok) {
@@ -894,6 +904,22 @@ export function OctavaApp() {
                 mp3Quality={mp3Quality}
                 onMp3Quality={setMp3Quality}
               />
+              <label className="flex items-center gap-1.5 rounded-md bg-raised p-1 pl-2.5 text-xs text-subtle shadow-[var(--shadow-border)]">
+                Названия
+                <select
+                  id="octava-title-lang"
+                  aria-label="Язык названий роликов"
+                  value={titleLang}
+                  onChange={(e) => setTitleLang(parseTitleLang(e.target.value))}
+                  className="h-8 rounded-sm bg-raised px-1.5 text-xs font-medium text-fg outline-none"
+                >
+                  {TITLE_LANGS.map((l) => (
+                    <option key={l} value={l}>
+                      {TITLE_LANG_LABEL[l]}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {typeof activePlaylistId === "string" &&
               activePlaylistId !== "inbox" &&
               activePlaylistId !== "history" &&
