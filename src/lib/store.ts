@@ -1,13 +1,21 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AudioFormat, LocalPlaylist, Mp3Quality, ResolveResult, Track } from "./media";
-import { DEFAULT_MP3_QUALITY, newId } from "./media";
+import type {
+  AudioFormat,
+  LocalPlaylist,
+  Mp3Quality,
+  ResolveResult,
+  TitleLang,
+  Track,
+} from "./media";
+import { DEFAULT_MP3_QUALITY, DEFAULT_TITLE_LANG, newId } from "./media";
 
 type Catalog = Record<string, Track>;
 
 type AppState = {
   format: AudioFormat;
   mp3Quality: Mp3Quality;
+  titleLang: TitleLang;
   catalog: Catalog;
   historyIds: string[];
   playlists: LocalPlaylist[];
@@ -15,6 +23,7 @@ type AppState = {
   inbox: ResolveResult | null;
   setFormat: (format: AudioFormat) => void;
   setMp3Quality: (quality: Mp3Quality) => void;
+  setTitleLang: (lang: TitleLang) => void;
   setInbox: (inbox: ResolveResult | null) => void;
   remember: (tracks: Track[]) => void;
   putCatalog: (tracks: Track[]) => void;
@@ -37,6 +46,7 @@ export const useLibrary = create<AppState>()(
     (set, get) => ({
       format: "m4a",
       mp3Quality: DEFAULT_MP3_QUALITY,
+      titleLang: DEFAULT_TITLE_LANG,
       catalog: {},
       historyIds: [],
       playlists: [],
@@ -44,6 +54,7 @@ export const useLibrary = create<AppState>()(
       inbox: null,
       setFormat: (format) => set({ format }),
       setMp3Quality: (mp3Quality) => set({ mp3Quality }),
+      setTitleLang: (titleLang) => set({ titleLang }),
       setInbox: (inbox) => set({ inbox }),
       remember: (tracks) => {
         if (tracks.length === 0) return;
@@ -163,6 +174,7 @@ export const useLibrary = create<AppState>()(
       partialize: (state) => ({
         format: state.format,
         mp3Quality: state.mp3Quality,
+        titleLang: state.titleLang,
         catalog: state.catalog,
         historyIds: state.historyIds,
         playlists: state.playlists,

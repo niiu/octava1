@@ -1,5 +1,26 @@
 export type AudioFormat = "m4a" | "mp3" | "source";
 
+// Язык названий роликов. "auto" — как отдаёт YouTube по умолчанию (старое поведение).
+export const TITLE_LANGS = ["ru", "en", "uk", "de", "es", "fr", "auto"] as const;
+export type TitleLang = (typeof TITLE_LANGS)[number];
+export const DEFAULT_TITLE_LANG: TitleLang = "ru";
+export const TITLE_LANG_LABEL: Record<TitleLang, string> = {
+  ru: "Русский",
+  en: "English",
+  uk: "Українська",
+  de: "Deutsch",
+  es: "Español",
+  fr: "Français",
+  auto: "Авто (как у YouTube)",
+};
+
+export function parseTitleLang(raw: unknown): TitleLang {
+  if (typeof raw === "string" && (TITLE_LANGS as readonly string[]).includes(raw)) {
+    return raw as TitleLang;
+  }
+  return DEFAULT_TITLE_LANG;
+}
+
 export const MP3_QUALITIES = ["320", "192", "128"] as const;
 export type Mp3Quality = (typeof MP3_QUALITIES)[number];
 export const DEFAULT_MP3_QUALITY: Mp3Quality = "192";

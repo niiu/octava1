@@ -17,6 +17,8 @@ import {
 } from "./media";
 import { parseYoutubeInput, toYtdlpTarget } from "./youtube-url";
 import { normalizeCookieFile } from "./cookie-file";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { DEFAULT_TITLE_LANG, parseTitleLang, type TitleLang } from "./media";
 import { cookieStatus } from "./cookie-store.server";
 import { pythonBin } from "./python.server";
 import { ffmpegBin, withRuntimePath, ytDlpCandidates } from "./runtime-path";
@@ -88,14 +90,26 @@ export async function getCaps(): Promise<ExtractorCaps> {
   };
 }
 
+const langStore = new AsyncLocalStorage<TitleLang>();
+
+export function runWithTitleLang<T>(lang: unknown, fn: () => Promise<T>): Promise<T> {
+  return langStore.run(parseTitleLang(lang), fn);
+}
+
+function currentTitleLang(): TitleLang {
+  return langStore.getStore() ?? DEFAULT_TITLE_LANG;
+}
+
 function baseArgs(cookieFile?: string | null): string[] {
+  const lang = currentTitleLang();
   const args = [
     "--js-runtimes",
     "node",
     "--no-check-certificates",
     "--newline",
     "--extractor-args",
-    "youtube:player_client=default,-tv_downgraded",
+    // lang=xx — YouTube отдаёт переведённые названия (иначе в списках/поиске приходит английский)
+    `youtube:player_client=default,-tv_downgraded${lang === "auto" ? "" : `;lang=${lang}`}`,
   ];
   const file = cookieFile === undefined ? cookiesPath() : cookieFile;
   if (file) args.push("--cookies", file);
@@ -362,7 +376,15 @@ function asTrack(entry: YtEntry | null | undefined): Track | null {
   };
 }
 
-export async function resolveInput(raw: string, cookiesText?: string): Promise<ResolveResult> {
+export async function resolveInput(
+  raw: string,
+  cookiesText?: string,
+  lang?: string,
+): Promise<ResolveResult> {
+  return runWithTitleLang(lang, () => resolveInputInner(raw, cookiesText));
+}
+
+async function resolveInputInner(raw: string, cookiesText?: string): Promise<ResolveResult> {
   appendLog("info", `запрос: ${raw.trim().slice(0, 180)}`);
   try {
     const result = await withCookieFile(cookiesText, (cookieFile) =>

@@ -13,6 +13,7 @@ const inputSchema = z.object({
   input: z.string().trim().min(1, "Вставьте ссылку или поисковый запрос").max(500),
   cookies: z.string().max(200_000).optional(),
   instance: z.string().max(48).optional(),
+  lang: z.string().max(8).optional(),
 });
 
 const instanceSchema = z.object({
@@ -53,7 +54,7 @@ export const resolveMedia = createServerFn({ method: "POST" })
     const instanceId = normalizeInstanceId(data.instance);
     return runWithInstance(instanceId, async () => {
       try {
-        const result = await resolveInput(data.input, data.cookies);
+        const result = await resolveInput(data.input, data.cookies, data.lang);
         return { ok: true as const, result, log: dumpLogText(24, instanceId) };
       } catch (err) {
         if (err instanceof ExtractorError) {
