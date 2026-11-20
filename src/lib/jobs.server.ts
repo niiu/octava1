@@ -26,6 +26,7 @@ type JobsRt = {
   cookiesByJob: Map<string, string | undefined>;
   controllers: Map<string, AbortController>;
   loaded: boolean;
+  loading: Promise<void> | null;
   persistTimer: ReturnType<typeof setTimeout> | null;
   jobsDir: string;
   pumping: boolean;
@@ -39,6 +40,7 @@ function rt(): JobsRt {
       cookiesByJob: new Map(),
       controllers: new Map(),
       loaded: false,
+      loading: null,
       persistTimer: null,
       jobsDir: "",
       pumping: false,
@@ -88,8 +90,19 @@ function indexPath(): string {
 }
 
 async function ensureLoaded(): Promise<void> {
-  if (rt().loaded) return;
-  rt().loaded = true;
+  const state = rt();
+  if (state.loaded) return;
+  // Every caller must wait for the index to be read. Flipping `loaded` before
+  // the read finished let a concurrent poll see an empty map -> "Нет такого задания".
+  if (!state.loading) {
+    state.loading = loadIndex().then(() => {
+      state.loaded = true;
+    });
+  }
+  await state.loading;
+}
+
+async function loadIndex(): Promise<void> {
   rt().jobsDir = resolveDir();
   try {
     const raw = await readFile(indexPath(), "utf8");
@@ -167,40 +180,49 @@ function findReusable(
   return best;
 }
 
+// Finished jobs stay protected for a while so a batch/ZIP that is still being
+// collected (or a client that polls slowly, e.g. a background tab) never loses
+// a job that completed a few minutes ago.
+const KEEP_FRESH_MS = 3 * 60 * 60 * 1000;
+
 async function prune(): Promise<void> {
-  const idleOf = (list: JobInternal[]) =>
+  const now = Date.now();
+  const isIdle = (j: JobInternal) =>
+    j.status === "done" || j.status === "error" || j.status === "cancelled";
+  const evictable = (list: JobInternal[]) =>
     list
-      .filter((j) => j.status === "done" || j.status === "error" || j.status === "cancelled")
+      .filter((j) => isIdle(j) && now - j.updatedAt > KEEP_FRESH_MS)
       .sort((a, b) => a.updatedAt - b.updatedAt);
 
+  const drop = async (old: JobInternal) => {
+    if (old.filePath) await unlink(old.filePath).catch(() => undefined);
+    jobs.delete(old.jobId);
+  };
+
+  // Cap applies to the archive of finished jobs only; queued/running ones are
+  // never counted, so a big batch cannot evict its own finished tracks.
   const grouped = new Map<string, JobInternal[]>();
   for (const job of jobs.values()) {
+    if (!isIdle(job)) continue;
     const key = job.instanceId || ANON_INSTANCE;
     const bucket = grouped.get(key);
     if (bucket) bucket.push(job);
     else grouped.set(key, [job]);
   }
   for (const group of grouped.values()) {
-    const idle = idleOf(group);
-    while (group.length > MAX_JOBS_PER_INSTANCE && idle.length > 0) {
-      const old = idle.shift();
-      if (!old) break;
-      if (old.filePath) await unlink(old.filePath).catch(() => undefined);
-      jobs.delete(old.jobId);
-      const idx = group.indexOf(old);
-      if (idx >= 0) group.splice(idx, 1);
+    let over = group.length - MAX_JOBS_PER_INSTANCE;
+    for (const old of evictable(group)) {
+      if (over <= 0) break;
+      await drop(old);
+      over -= 1;
     }
   }
-  if (jobs.size <= MAX_JOBS) {
-    schedulePersist();
-    return;
-  }
-  const idle = idleOf([...jobs.values()]);
-  while (jobs.size > MAX_JOBS && idle.length > 0) {
-    const old = idle.shift();
-    if (!old) break;
-    if (old.filePath) await unlink(old.filePath).catch(() => undefined);
-    jobs.delete(old.jobId);
+  const idleAll = [...jobs.values()].filter(isIdle);
+  let overAll = idleAll.length - MAX_JOBS;
+  for (const old of evictable(idleAll)) {
+    if (overAll <= 0) break;
+    await drop(old);
+    overAll -= 1;
   }
   schedulePersist();
 }

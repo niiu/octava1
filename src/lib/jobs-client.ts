@@ -265,11 +265,13 @@ export async function waitForJob(
   signal?: AbortSignal,
 ): Promise<DownloadJob> {
   let misses = 0;
+  let notFound = 0;
   for (;;) {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     try {
       const job = await getJob(jobId);
       misses = 0;
+      notFound = 0;
       onProgress?.(Math.max(0.03, job.progress));
       if (job.status === "done") return job;
       if (job.status === "error") {
@@ -279,6 +281,13 @@ export async function waitForJob(
         throw new DOMException("Aborted", "AbortError");
       }
     } catch (err) {
+      // A 404 right after a service restart or while the index is still loading
+      // is transient; retry a few times before giving up.
+      if (err instanceof DownloadError && err.code === "NOT_FOUND" && notFound < 5) {
+        notFound += 1;
+        await sleep(600 * notFound, signal);
+        continue;
+      }
       if (err instanceof DownloadError || (err instanceof DOMException && err.name === "AbortError")) {
         throw err;
       }
